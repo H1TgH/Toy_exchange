@@ -1,0 +1,5 @@
+fastapi[standard]==0.115.12
+SQLAlchemy==2.0.40
+alembic==1.15.2
+asyncpg==0.30.0
+passlib[bcrypt]==1.7.4
