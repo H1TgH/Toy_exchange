@@ -41,7 +41,7 @@ class UserModel(Base):
         unique=True
     )
 
-    created_at = Mapped[datetime] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         nullable=False,
         server_default=func.now()
     )
