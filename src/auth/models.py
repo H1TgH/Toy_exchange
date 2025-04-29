@@ -1,7 +1,8 @@
 from enum import Enum as PyEnum
 from datetime import datetime
+from uuid import uuid4
 
-from sqlalchemy import BigInteger, String, Enum,  func
+from sqlalchemy import String, Enum,  func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.database import Base
@@ -12,16 +13,18 @@ class RoleEnum(PyEnum):
     ADMIN = 'ADMIN'
 
 class UserModel(Base):
-    id: Mapped[int] = mapped_column(
-        BigInteger,
+    __tablename__ = 'users'
+    
+    id: Mapped[str] = mapped_column(
+        String(36),
         primary_key=True,
-        autoincrement=True,
+        default=lambda: str(uuid4()),
         unique= True,
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     name: Mapped[str] = mapped_column(
-        String(64),
         nullable=False
     )
 
@@ -32,11 +35,13 @@ class UserModel(Base):
     )
 
     api_key: Mapped[str] = mapped_column(
+        String(43),
         nullable=False,
+        index=True,
         unique=True
     )
 
     created_at = Mapped[datetime] = mapped_column(
         nullable=False,
-        default=func.now()
+        server_default=func.now()
     )
