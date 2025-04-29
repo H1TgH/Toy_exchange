@@ -10,6 +10,7 @@ class UserRegistrationSchema(BaseModel):
     def validate_name(cls, name):
         if len(name) < 3:
             raise ValueError('Name too short')
+        return name
 
 class UserRegistrationResponceSchema(BaseModel):
     id: str
