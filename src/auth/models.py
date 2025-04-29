@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import String, Enum,  func
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID
 
 from src.database import Base
 
@@ -16,7 +17,7 @@ class UserModel(Base):
     __tablename__ = 'users'
     
     id: Mapped[str] = mapped_column(
-        String(36),
+        UUID,
         primary_key=True,
         default=lambda: str(uuid4()),
         unique= True,
