@@ -9,6 +9,7 @@ from alembic import context
 
 from src.database import Base
 from src.auth.models import UserModel
+from src.instrument.models import InstrumentModel
 
 config = context.config
 
