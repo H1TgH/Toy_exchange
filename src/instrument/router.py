@@ -10,7 +10,7 @@ from src.instrument.schemas import InstrumentCreateSchema
 
 instrument_router = APIRouter()
 
-@instrument_router.get('/api/v1/public/instrument', response_model=list[InstrumentCreateSchema])
+@instrument_router.get('/api/v1/public/instrument', response_model=list[InstrumentCreateSchema], tags=['public'])
 async def get_instruments_list(
     session: SessionDep
 ):
@@ -20,7 +20,7 @@ async def get_instruments_list(
 
     return instruments
 
-@instrument_router.post('/api/v1/admin/instrument', response_model=OkResponseSchema)
+@instrument_router.post('/api/v1/admin/instrument', response_model=OkResponseSchema, tags=['admin'])
 async def create_instrument(
     user_data: InstrumentCreateSchema,
     session: SessionDep,
@@ -36,7 +36,7 @@ async def create_instrument(
 
     return {'success': True}
 
-@instrument_router.delete('/api/v1/admin/instrument/{ticker}', response_model=OkResponseSchema)
+@instrument_router.delete('/api/v1/admin/instrument/{ticker}', response_model=OkResponseSchema, tags=['admin'])
 async def delete_instrument(
     session: SessionDep,
     ticker: str,

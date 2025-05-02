@@ -8,7 +8,7 @@ from src.auth.utils import generate_api_key
 
 auth_router = APIRouter()
 
-@auth_router.post('/api/v1/public/register', response_model=UserRegistrationResponceSchema)
+@auth_router.post('/api/v1/public/register', response_model=UserRegistrationResponceSchema, tags=['public'])
 async def register_user(
     user_data: UserRegistrationSchema,
     session: SessionDep
