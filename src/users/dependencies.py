@@ -4,7 +4,7 @@ from fastapi import Header, HTTPException, Depends, status
 from sqlalchemy import select
 
 from src.database import SessionDep
-from src.auth.models import UserModel, RoleEnum
+from src.users.models import UserModel, RoleEnum
 
 
 async def get_current_user(

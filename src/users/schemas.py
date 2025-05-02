@@ -1,6 +1,6 @@
 from pydantic import BaseModel, field_validator
 
-from src.auth.models import RoleEnum
+from src.users.models import RoleEnum
 
 
 class UserRegistrationSchema(BaseModel):

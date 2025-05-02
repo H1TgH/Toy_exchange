@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from src.auth.router import auth_router
+from src.users.router import auth_router
 from src.instrument.router import instrument_router
 
 

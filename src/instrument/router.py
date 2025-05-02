@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
-from src.auth.dependencies import get_current_admin
+from src.users.dependencies import get_current_admin
 from src.instrument.models import InstrumentModel
 from src.instrument.schemas import InstrumentCreateSchema
 
@@ -31,6 +31,7 @@ async def create_instrument(
         ticker=user_data.ticker,
         user_id=admin_user.id
     )
+    
     session.add(new_instrument)
     await session.commit()
 
