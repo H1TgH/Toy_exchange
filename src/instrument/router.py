@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import select
 
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
@@ -24,3 +25,14 @@ async def create_instrument(
     await session.commit()
 
     return {'success': True}
+
+@instrument_router.get('/api/v1/public/instrument', response_model=list[InstrumentCreateSchema])
+async def get_instruments_list(
+    session: SessionDep
+):
+    result = await session.execute(select(InstrumentModel))
+
+    instruments = result.scalars().all()
+    print(instruments)
+
+    return instruments
