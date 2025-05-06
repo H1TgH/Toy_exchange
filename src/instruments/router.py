@@ -4,8 +4,8 @@ from sqlalchemy import select
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
 from src.users.dependencies import get_current_admin
-from src.instrument.models import InstrumentModel
-from src.instrument.schemas import InstrumentCreateSchema
+from src.instruments.models import InstrumentModel
+from src.instruments.schemas import InstrumentCreateSchema
 
 
 instrument_router = APIRouter()
