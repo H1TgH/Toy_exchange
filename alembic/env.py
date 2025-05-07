@@ -12,6 +12,7 @@ from src.users.models import UserModel
 from src.instruments.models import InstrumentModel
 from src.orders.models import OrderModel
 from src.balance.models import BalanceModel
+from src.transactions.models import TransactionModel
 
 config = context.config
 
