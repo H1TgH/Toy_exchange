@@ -3,7 +3,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Enum, String, Integer, ForeignKey, func
+from sqlalchemy import Enum, String, Integer, ForeignKey, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.database import Base
@@ -70,6 +70,7 @@ class OrderModel(Base):
     )
 
     timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         index=True,
         nullable=False
