@@ -25,7 +25,7 @@ class OrderModel(Base):
     id: Mapped[str] = mapped_column(
         UUID,
         primary_key=True,
-        default=lambda: str(uuid4),
+        default=lambda: str(uuid4()),
         nullable=False
     )
 
