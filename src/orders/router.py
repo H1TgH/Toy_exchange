@@ -1,12 +1,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import select, update, func
 
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
-from src.orders.models import OrderModel, StatusEnum
-from src.orders.schemas import  OrderBodySchema, CreateOrderResponseSchema, OrderResponseSchema, LimitOrderSchema, LimitOrderBodySchema, MarketOrderSchema, MarketOrderBodySchema
+from src.orders.models import OrderModel, StatusEnum, DirectionEnum
+from src.orders.schemas import  OrderBodySchema, CreateOrderResponseSchema, OrderResponseSchema, LimitOrderSchema, LimitOrderBodySchema, MarketOrderSchema, MarketOrderBodySchema, OrderBookListSchema
 from src.users.dependencies import get_current_user
 from src.users.models import UserModel
 
@@ -137,3 +137,33 @@ async def cancel_order(
     await session.commit()
 
     return {'success': True}
+
+@order_router.get('/api/v1/public/orderbook/{ticker}', response_model=OrderBookListSchema, tags=['public'])
+async def get_order_book(
+    session: SessionDep,
+    ticker: str
+):
+    bid_orders = await session.execute(
+        select(OrderModel.price, func.sum(OrderModel.qty))
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(OrderModel.direction == DirectionEnum.BUY)
+        .where(OrderModel.ticker == ticker)
+        .group_by(OrderModel.price)
+        .order_by(OrderModel.price.desc())
+    )
+    ask_orders = await session.execute(
+        select(OrderModel.price, func.sum(OrderModel.qty))
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(OrderModel.direction == DirectionEnum.SELL)
+        .where(OrderModel.ticker == ticker)
+        .group_by(OrderModel.price)
+        .order_by(OrderModel.price.asc())
+    )
+
+    bid_levels = [{"price": price, "qty": qty} for price, qty in bid_orders]
+    ask_levels = [{"price": price, "qty": qty} for price, qty in ask_orders]
+
+    return OrderBookListSchema(
+        bid_levels=bid_levels,
+        ask_levels=ask_levels
+    )
