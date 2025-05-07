@@ -35,6 +35,41 @@ async def create_order(
         'order_id': new_order.id
     }
 
+@order_router.get('/api/v1/order', response_model=list[OrderResponseSchema])
+async def get_orders_list(
+    session: SessionDep,
+    current_user: UserModel = Depends(get_current_user)
+):
+    orders = await session.scalars(select(OrderModel))
+
+    result = []
+    for order in orders:
+        body_data = {
+            "direction": order.direction,
+            "ticker": order.ticker,
+            "qty": order.qty,
+        }
+
+        if order.price is not None:
+            result.append(LimitOrderSchema(
+                id = order.id,
+                status = order.status,
+                user_id = order.user_id,
+                timestamp = order.timestamp,
+                body=LimitOrderBodySchema(**body_data, price=order.price),
+                filled=order.filled
+            ))
+        else:
+            result.append(MarketOrderSchema(
+                id = order.id,
+                status = order.status,
+                user_id = order.user_id,
+                timestamp = order.timestamp,
+                body=MarketOrderBodySchema(**body_data)
+            ))
+
+    return result
+
 @order_router.get('/api/v1/order/{order_id}', response_model=OrderResponseSchema, tags=['order'])
 async def get_order(
     session: SessionDep,
@@ -42,7 +77,7 @@ async def get_order(
     current_user: UserModel = Depends(get_current_user)
 ):
     order = await session.scalar(
-        select(OrderModel).where(OrderModel.id == order_id, OrderModel.user_id == current_user.id)
+        select(OrderModel).where(OrderModel.id == order_id)
     )
 
     if not order:
@@ -52,9 +87,9 @@ async def get_order(
         )
 
     body_data = {
-        "direction": order.direction,
-        "ticker": order.ticker,
-        "qty": order.qty
+        'direction': order.direction,
+        'ticker': order.ticker,
+        'qty': order.qty
     }
 
     if order.price is not None:
