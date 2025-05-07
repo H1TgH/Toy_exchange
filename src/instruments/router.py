@@ -27,9 +27,9 @@ async def create_instrument(
     admin_user = Depends(get_current_admin)
 ):
     new_instrument = InstrumentModel(
-        name=user_data.name,
-        ticker=user_data.ticker,
-        user_id=admin_user.id
+        name = user_data.name,
+        ticker = user_data.ticker,
+        user_id = admin_user.id
     )
     
     session.add(new_instrument)
