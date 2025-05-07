@@ -16,7 +16,7 @@ class LimitOrderBodySchema(MarketOrderBodySchema):
 class OrderSchema(BaseModel):
     id: UUID
     status: StatusEnum
-    user_id: str
+    user_id: UUID
     timestamp: datetime
 
 class LimitOrderSchema(OrderSchema):
