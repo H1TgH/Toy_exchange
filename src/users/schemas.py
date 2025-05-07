@@ -1,4 +1,5 @@
 from pydantic import BaseModel, field_validator
+from uuid import UUID 
 
 from src.users.models import RoleEnum
 
@@ -13,7 +14,7 @@ class UserRegistrationSchema(BaseModel):
         return name
 
 class UserRegistrationResponceSchema(BaseModel):
-    id: str
+    id: UUID
     name: str
     role: RoleEnum
     api_key: str

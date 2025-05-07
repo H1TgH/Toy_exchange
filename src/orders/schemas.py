@@ -1,6 +1,7 @@
 from typing import Union, Literal
 from pydantic import BaseModel, Field
 from datetime import datetime
+from uuid import UUID
 
 from src.orders.models import DirectionEnum, StatusEnum
 
@@ -13,7 +14,7 @@ class LimitOrderBodySchema(MarketOrderBodySchema):
     price: int = Field(gt=0)
 
 class OrderSchema(BaseModel):
-    id: str
+    id: UUID
     status: StatusEnum
     user_id: str
     timestamp: datetime
@@ -31,4 +32,4 @@ OrderResponseSchema = Union[LimitOrderSchema, MarketOrderSchema]
 
 class CreateOrderResponseSchema(BaseModel):
     success: Literal[True] = Field(default=True)
-    order_id: str
+    order_id: UUID
