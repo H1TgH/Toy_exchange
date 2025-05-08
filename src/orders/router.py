@@ -23,9 +23,11 @@ async def create_order(
         user_id = current_user.id,
         ticker = user_data.ticker,
         direction = user_data.direction,
-        qty = user_data.qty,
-        price = user_data.price,
+        qty = user_data.qty
     )
+
+    if isinstance(user_data, LimitOrderBodySchema):
+        new_order.price = user_data.price
 
     session.add(new_order)
     await session.commit()
@@ -148,6 +150,7 @@ async def get_order_book(
         .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
+        .where(OrderModel.price.isnot(None))
         .group_by(OrderModel.price)
         .order_by(OrderModel.price.desc())
     )
@@ -156,6 +159,7 @@ async def get_order_book(
         .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
+        .where(OrderModel.price.isnot(None))
         .group_by(OrderModel.price)
         .order_by(OrderModel.price.asc())
     )
