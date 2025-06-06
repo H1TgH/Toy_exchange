@@ -1,8 +1,10 @@
 from uuid import UUID
 from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
+
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
 from src.orders.models import OrderModel, StatusEnum, DirectionEnum
@@ -13,9 +15,15 @@ from src.instruments.models import InstrumentModel
 from src.balance.models import BalanceModel
 from src.transactions.models import TransactionModel
 
+
 order_router = APIRouter()
 
-async def check_balance(session: SessionDep, user_id: UUID, ticker: str, required_amount: float):
+async def check_balance(
+    session: SessionDep, 
+    user_id: UUID, 
+    ticker: str, 
+    required_amount: float
+):
     balance = await session.scalar(
         select(BalanceModel)
         .where(BalanceModel.user_id == user_id)
@@ -28,7 +36,12 @@ async def check_balance(session: SessionDep, user_id: UUID, ticker: str, require
         )
     return True
 
-async def update_balance(session: SessionDep, user_id: UUID, ticker: str, delta: float):
+async def update_balance(
+    session: SessionDep, 
+    user_id: UUID, 
+    ticker: str, 
+    delta: float
+):
     balance = await session.scalar(
         select(BalanceModel)
         .where(BalanceModel.user_id == user_id)
