@@ -1,12 +1,10 @@
-from pydantic import BaseModel
-from datetime import datetime
 from uuid import UUID
+from datetime import datetime
+
+from pydantic import BaseModel
 
 
-class TransactionSchema(BaseModel):
-    id: UUID
-    buyer_id: UUID | None
-    seller_id: UUID | None
+class TransactionRescponseSchema(BaseModel):
     ticker: str
     amount: int
     price: int
