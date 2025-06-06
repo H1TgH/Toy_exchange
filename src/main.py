@@ -7,7 +7,27 @@ from src.balance.router import balance_router
 from src.transactions.router import transaction_router
 
 
-app = FastAPI()
+app = FastAPI(
+    title='Trading API',
+    openapi_tags=[
+        {
+            'name': 'public',
+        },
+        {
+            'name': 'balance',
+        },
+        {
+            'name': 'order',
+        },
+        {
+            'name': 'admin',
+        },
+        {
+            'name': 'user',
+        }
+    ]
+)
+
 app.include_router(auth_router)
 app.include_router(instrument_router)
 app.include_router(order_router)

@@ -31,7 +31,7 @@ async def register_user(
         'api_key': new_user_api_key
     }
 
-@auth_router.delete('/api/v1/admin/user/{user_id}', response_model=UserRegistrationResponceSchema, tags=['admin'])
+@auth_router.delete('/api/v1/admin/user/{user_id}', response_model=UserRegistrationResponceSchema, tags=['admin', 'user'])
 async def delete_user(
     session: SessionDep,
     user_id: str,

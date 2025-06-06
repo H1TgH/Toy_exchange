@@ -8,10 +8,23 @@ from src.balance.schemas import BalanceSchema
 from src.users.dependencies import get_current_admin, get_current_user
 from src.schemas import OkResponseSchema
 
+
 balance_router = APIRouter()
 
-@balance_router.post('/api/v1/admin/balance/deposit', response_model=OkResponseSchema, tags=['admin'])
-async def replenish_balance(
+@balance_router.get('/api/v1/balance', response_model=dict[str, int], tags=['balance'])
+async def get_balances(
+    session: SessionDep,
+    current_user: UserModel = Depends(get_current_user)
+):
+    balances = await session.scalars(
+        select(BalanceModel)
+        .where(BalanceModel.user_id == current_user.id)
+    )
+
+    return {balance.ticker: int(balance.amount) for balance in balances.all()}
+
+@balance_router.post('/api/v1/admin/balance/deposit', response_model=OkResponseSchema, tags=['admin', 'balance'])
+async def deposit_balance(
     balance_data: BalanceSchema, 
     session: SessionDep,
     current_admin: UserModel = Depends(get_current_admin)
@@ -88,15 +101,3 @@ async def withdraw_balance(
     await session.commit()
 
     return {'success': True}
-
-@balance_router.get('/api/v1/balance', response_model=dict[str, int], tags=['balance'])
-async def get_balances(
-    session: SessionDep,
-    current_user: UserModel = Depends(get_current_user)
-):
-    balances = await session.scalars(
-        select(BalanceModel)
-        .where(BalanceModel.user_id == current_user.id)
-    )
-
-    return {balance.ticker: int(balance.amount) for balance in balances.all()}
