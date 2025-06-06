@@ -5,7 +5,7 @@ from src.database import SessionDep
 from src.balance.models import BalanceModel
 from src.users.models import UserModel
 from src.balance.schemas import BalanceSchema
-from src.users.dependencies import get_current_admin
+from src.users.dependencies import get_current_admin, get_current_user
 from src.schemas import OkResponseSchema
 
 balance_router = APIRouter()
@@ -88,3 +88,15 @@ async def withdraw_balance(
     await session.commit()
 
     return {'success': True}
+
+@balance_router.get('/api/v1/balance', response_model=dict[str, int], tags=['balance'])
+async def get_balances(
+    session: SessionDep,
+    current_user: UserModel = Depends(get_current_user)
+):
+    balances = await session.scalars(
+        select(BalanceModel)
+        .where(BalanceModel.user_id == current_user.id)
+    )
+
+    return {balance.ticker: int(balance.amount) for balance in balances.all()}
