@@ -47,7 +47,7 @@ async def delete_instrument(
 
     if not instrument:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
+            status_code=status.HTTP_400_BAD_REQUEST, 
             detail='Instrument not found'
         )
 

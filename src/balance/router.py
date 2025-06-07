@@ -86,7 +86,7 @@ async def withdraw_balance(
     
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail='User not found'
         )
 

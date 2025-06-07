@@ -89,7 +89,7 @@ async def create_order(
         )
         if not instrument:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail='Instrument not found'
             )
 
@@ -242,7 +242,7 @@ async def get_order(
     )
     if not order:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail='Order not found'
         )
     body_data = {
@@ -279,7 +279,7 @@ async def cancel_order(
     )
     if not order:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail='Order not found'
         )
     if order.user_id != current_user.id:
