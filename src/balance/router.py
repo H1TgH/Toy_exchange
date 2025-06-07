@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from src.database import SessionDep
 from src.balance.models import BalanceModel
+from src.instruments.models import InstrumentModel
 from src.users.models import UserModel
 from src.balance.schemas import BalanceSchema
 from src.users.dependencies import get_current_admin, get_current_user
@@ -30,13 +31,25 @@ async def deposit_balance(
     current_admin: UserModel = Depends(get_current_admin)
 ):
     user = await session.scalar(
-        select(UserModel).where(UserModel.id == balance_data.user_id)
+        select(UserModel)
+        .where(UserModel.id == balance_data.user_id)
     )
     
     if not user:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Invalid user_id value'
+        )
+
+    ticker = await session.scalar(
+        select(InstrumentModel)
+        .where(InstrumentModel.ticker == balance_data.ticker)
+    )
+
+    if not ticker:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Invalid ticker value'
         )
 
     balance = await session.scalar(
@@ -74,7 +87,7 @@ async def withdraw_balance(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail='User not found'
         )
 
     balance = await session.scalar(
@@ -88,13 +101,13 @@ async def withdraw_balance(
     if not balance:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No balance found for ticker {balance_data.ticker}"
+            detail=f'No balance found for ticker {balance_data.ticker}'
         )
 
     if balance.amount < balance_data.amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Insufficient balance for withdrawal"
+            detail='Insufficient balance for withdrawal'
         )
 
     balance.amount -= balance_data.amount
