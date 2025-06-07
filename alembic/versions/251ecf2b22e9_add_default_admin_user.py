@@ -23,6 +23,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade():
     admin_id = str(uuid4())
     api_key = secrets.token_urlsafe(32)[:43]
+    instrument_id = str(uuid4())
     
     op.execute(
         f"""
@@ -32,5 +33,13 @@ def upgrade():
         """
     )
 
+    op.execute(
+        f"""
+        INSERT INTO instruments (id, name, ticker, user_id)
+        VALUES ('{instrument_id}', 'Ruble', 'RUB', '{admin_id}')
+        """
+    )
+
 def downgrade():
-    op.execute("DELETE FROM users WHERE name = 'admin'")
+    op.execute('DELETE FROM users WHERE name = "admin"')
+    op.execute('DELETE FROM instruments WHERE ticker = "RUB"')

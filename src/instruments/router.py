@@ -48,10 +48,10 @@ async def delete_instrument(
     if not instrument:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Instrument not found"
+            detail='Instrument not found'
         )
 
     await session.delete(instrument)
     await session.commit()
 
-    return {"success": True}
+    return {'success': True}

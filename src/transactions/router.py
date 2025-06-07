@@ -21,7 +21,7 @@ async def get_transaction_history(
     if not instrument:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Instrument not found"
+            detail='Instrument not found'
         )
 
     transactions = await session.scalars(

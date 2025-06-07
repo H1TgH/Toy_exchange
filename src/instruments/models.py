@@ -1,4 +1,5 @@
 from uuid import uuid4
+from typing import Optional
 
 from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,8 +28,8 @@ class InstrumentModel(Base):
         unique=True
     )
 
-    user_id: Mapped[str] = mapped_column(
+    user_id: Mapped[Optional[str]] = mapped_column(  # <-- здесь важно
         UUID,
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False
+        ForeignKey('users.id', ondelete='SET NULL'),
+        nullable=True
     )

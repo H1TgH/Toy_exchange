@@ -8,3 +8,4 @@ pytest-asyncio==0.26.0
 httpx==0.28.1
 gunicorn
 python-dotenv
+psycopg2

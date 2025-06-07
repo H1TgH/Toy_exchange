@@ -32,7 +32,7 @@ async def check_balance(
     if not balance or balance.amount < required_amount:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Insufficient balance for {ticker}"
+            detail=f'Insufficient balance for {ticker}'
         )
     return True
 
@@ -54,7 +54,7 @@ async def update_balance(
     if new_amount < 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Negative balance not allowed for {ticker}"
+            detail=f'Negative balance not allowed for {ticker}'
         )
     balance.amount = new_amount
 
@@ -118,7 +118,7 @@ async def create_order(
             if available_qty < new_order.qty:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Insufficient liquidity for market order"
+                    detail='Insufficient liquidity for market order'
                 )
 
         total_filled = 0
@@ -133,7 +133,7 @@ async def create_order(
 
             transaction_price = matching_order.price
             if transaction_price is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Matching order has no price")
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Matching order has no price')
 
             if new_order.direction == DirectionEnum.BUY:
                 await check_balance(session, current_user.id, 'RUB', match_qty * transaction_price)
@@ -190,13 +190,13 @@ async def create_order(
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {str(e)}"
+            detail=f'Database error: {str(e)}'
         )
     except Exception as e:
         await session.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unexpected error: {str(e)}"
+            detail=f'Unexpected error: {str(e)}'
         )
 
 @order_router.get('/api/v1/order', response_model=list[OrderResponseSchema], tags=['order'])
@@ -208,9 +208,9 @@ async def get_orders_list(
     result = []
     for order in orders:
         body_data = {
-            "direction": order.direction,
-            "ticker": order.ticker,
-            "qty": order.qty,
+            'direction': order.direction,
+            'ticker': order.ticker,
+            'qty': order.qty,
         }
         if order.price is not None:
             result.append(LimitOrderSchema(
@@ -314,8 +314,8 @@ async def get_order_book(
         .group_by(OrderModel.price)
         .order_by(OrderModel.price.asc())
     )
-    bid_levels = [{"price": price, "qty": qty} for price, qty in bid_orders]
-    ask_levels = [{"price": price, "qty": qty} for price, qty in ask_orders]
+    bid_levels = [{'price': price, 'qty': qty} for price, qty in bid_orders]
+    ask_levels = [{'price': price, 'qty': qty} for price, qty in ask_orders]
     return OrderBookListSchema(
         bid_levels=bid_levels,
         ask_levels=ask_levels
