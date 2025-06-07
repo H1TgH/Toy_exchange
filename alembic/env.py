@@ -1,5 +1,6 @@
 import asyncio
 from logging.config import fileConfig
+import os
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
@@ -21,6 +22,10 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise ValueError("DATABASE_URL environment variable is not set")
+config.set_main_option("sqlalchemy.url", database_url)
 
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
