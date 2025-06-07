@@ -297,7 +297,7 @@ async def get_order_book(
     ticker: str
 ):
     bid_orders = await session.execute(
-        select(OrderModel.price, func.sum(OrderModel.qty))
+        select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
         .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
@@ -305,8 +305,9 @@ async def get_order_book(
         .group_by(OrderModel.price)
         .order_by(OrderModel.price.desc())
     )
+
     ask_orders = await session.execute(
-        select(OrderModel.price, func.sum(OrderModel.qty))
+        select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
         .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
@@ -314,8 +315,10 @@ async def get_order_book(
         .group_by(OrderModel.price)
         .order_by(OrderModel.price.asc())
     )
+
     bid_levels = [{'price': price, 'qty': qty} for price, qty in bid_orders]
     ask_levels = [{'price': price, 'qty': qty} for price, qty in ask_orders]
+
     return OrderBookListSchema(
         bid_levels=bid_levels,
         ask_levels=ask_levels
