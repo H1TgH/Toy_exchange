@@ -1,13 +1,17 @@
 from typing import Annotated
 import os
 
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
 
 from fastapi import Depends
 
+load_dotenv()
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL not set")
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://birzha:birzha@db:5432/birzha")
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
