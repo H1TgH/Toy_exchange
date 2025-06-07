@@ -298,7 +298,7 @@ async def get_order_book(
 ):
     bid_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty))
-        .where(OrderModel.status.in_([None, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
@@ -307,7 +307,7 @@ async def get_order_book(
     )
     ask_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty))
-        .where(OrderModel.status.in_([None, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
