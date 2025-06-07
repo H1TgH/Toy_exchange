@@ -9,4 +9,4 @@ COPY src ./src
 COPY alembic ./alembic
 COPY alembic.ini .
 
-CMD ["gunicorn", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "src.main:app", "--bind", "0.0.0.0:$PORT"]
+CMD sh -c "alembic upgrade head && gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.main:app --bind 0.0.0.0:$PORT"
