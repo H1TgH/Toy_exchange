@@ -22,7 +22,7 @@ async def check_balance(
     session: SessionDep, 
     user_id: UUID, 
     ticker: str, 
-    required_amount: float
+    required_amount: int
 ):
     balance = await session.scalar(
         select(BalanceModel)
@@ -133,7 +133,10 @@ async def create_order(
 
             transaction_price = matching_order.price
             if transaction_price is None:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Matching order has no price')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, 
+                    detail='Matching order has no price'
+                )
 
             if new_order.direction == DirectionEnum.BUY:
                 await check_balance(session, current_user.id, 'RUB', match_qty * transaction_price)
