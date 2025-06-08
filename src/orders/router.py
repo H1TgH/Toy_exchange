@@ -275,7 +275,8 @@ async def cancel_order(
     current_user: UserModel = Depends(get_current_user)
 ):
     order = await session.scalar(
-        select(OrderModel).where(OrderModel.id == order_id)
+        select(OrderModel)
+        .where(OrderModel.id == order_id)
     )
     if not order:
         raise HTTPException(
@@ -287,7 +288,20 @@ async def cancel_order(
             status_code=status.HTTP_403_FORBIDDEN,
             detail='You can only cancel your own orders'
         )
-    order.status = None
+    
+    if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel executed or partially executed order.'
+        )
+    
+    if not order.price:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel market order'
+        )
+    
+    order.status = StatusEnum.CANCELLED 
     await session.commit()
     return {'success': True}
 
