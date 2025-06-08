@@ -64,143 +64,131 @@ async def create_order(
     user_data: OrderBodySchema,
     current_user: UserModel = Depends(get_current_user)
 ):
-    try:
-        if isinstance(user_data, LimitOrderBodySchema):
-            price = user_data.price
-        else:
-            price = None
+    if isinstance(user_data, LimitOrderBodySchema):
+        price = user_data.price
+    else:
+        price = None
 
-        if user_data.direction == DirectionEnum.BUY and price is not None:
-            await check_balance(session, current_user.id, 'RUB', user_data.qty * price)
-        elif user_data.direction == DirectionEnum.SELL:
-            await check_balance(session, current_user.id, user_data.ticker, user_data.qty)
+    if user_data.direction == DirectionEnum.BUY and price is not None:
+        await check_balance(session, current_user.id, 'RUB', user_data.qty * price)
+    elif user_data.direction == DirectionEnum.SELL:
+        await check_balance(session, current_user.id, user_data.ticker, user_data.qty)
 
-        new_order = OrderModel(
-            user_id=current_user.id,
-            ticker=user_data.ticker,
-            direction=user_data.direction,
-            qty=user_data.qty,
-            price=price
-        )
+    new_order = OrderModel(
+        user_id=current_user.id,
+        ticker=user_data.ticker,
+        direction=user_data.direction,
+        qty=user_data.qty,
+        price=price
+    )
 
-        instrument = await session.scalar(
-            select(InstrumentModel)
-            .where(InstrumentModel.ticker == user_data.ticker)
-        )
-        if not instrument:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='Instrument not found'
-            )
-
-        if user_data.direction == DirectionEnum.BUY:
-            opposite_direction = DirectionEnum.SELL
-            sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc())
-            price_condition = OrderModel.price <= new_order.price if new_order.price else True
-        else:
-            opposite_direction = DirectionEnum.BUY
-            sorting_by = (OrderModel.price.desc(), OrderModel.timestamp.asc())
-            price_condition = OrderModel.price >= new_order.price if new_order.price else True
-
-        matching_orders = await session.execute(
-            select(OrderModel)
-            .where(OrderModel.ticker == user_data.ticker)
-            .where(OrderModel.direction == opposite_direction)
-            .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
-            .where(price_condition)
-            .order_by(*sorting_by)
-            .with_for_update()
-        )
-        matching_orders = matching_orders.scalars().all()
-
-        if price is None:
-            available_qty = sum(order.qty - order.filled for order in matching_orders)
-            if available_qty < new_order.qty:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail='Insufficient liquidity for market order'
-                )
-
-        total_filled = 0
-        for matching_order in matching_orders:
-            if total_filled >= new_order.qty:
-                break
-
-            remaining_qty = new_order.qty - total_filled
-            match_qty = min(remaining_qty, matching_order.qty - matching_order.filled)
-            if match_qty <= 0:
-                continue
-
-            transaction_price = matching_order.price
-            if transaction_price is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, 
-                    detail='Matching order has no price'
-                )
-
-            if new_order.direction == DirectionEnum.BUY:
-                await check_balance(session, current_user.id, 'RUB', match_qty * transaction_price)
-                await check_balance(session, matching_order.user_id, new_order.ticker, match_qty)
-            else:
-                await check_balance(session, current_user.id, new_order.ticker, match_qty)
-                await check_balance(session, matching_order.user_id, 'RUB', match_qty * transaction_price)
-
-            transaction = TransactionModel(
-                ticker=new_order.ticker,
-                amount=match_qty,
-                price=transaction_price,
-                timestamp=datetime.now(timezone.utc),
-                buyer_id=current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id,
-                seller_id=matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
-            )
-            session.add(transaction)
-
-            matching_order.filled += match_qty
-            if matching_order.filled == matching_order.qty:
-                matching_order.status = StatusEnum.EXECUTED
-            else:
-                matching_order.status = StatusEnum.PARTIALLY_EXECUTED
-
-            total_filled += match_qty
-
-            buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
-            seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
-
-            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price)
-            await update_balance(session, seller, 'RUB', match_qty * transaction_price)
-            await update_balance(session, buyer, new_order.ticker, match_qty)
-            await update_balance(session, seller, new_order.ticker, -match_qty)
-
-        new_order.filled = total_filled
-        if total_filled == new_order.qty:
-            new_order.status = StatusEnum.EXECUTED
-        elif total_filled > 0 and price is not None:
-            new_order.status = StatusEnum.PARTIALLY_EXECUTED
-        else:
-            new_order.status = StatusEnum.NEW
-
-        if price is not None or new_order.status == StatusEnum.EXECUTED:
-            session.add(new_order)
-        await session.commit()
-
-        return CreateOrderResponseSchema(
-            success=True,
-            order_id=new_order.id,
-            filled_qty=new_order.filled,
-            status=new_order.status
-        )
-    except SQLAlchemyError as e:
-        await session.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f'Database error: {str(e)}'
-        )
-    except Exception as e:
-        await session.rollback()
+    instrument = await session.scalar(
+        select(InstrumentModel)
+        .where(InstrumentModel.ticker == user_data.ticker)
+    )
+    if not instrument:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'Unexpected error: {str(e)}'
+            detail='Instrument not found'
         )
+
+    if user_data.direction == DirectionEnum.BUY:
+        opposite_direction = DirectionEnum.SELL
+        sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc())
+        price_condition = OrderModel.price <= new_order.price if new_order.price else True
+    else:
+        opposite_direction = DirectionEnum.BUY
+        sorting_by = (OrderModel.price.desc(), OrderModel.timestamp.asc())
+        price_condition = OrderModel.price >= new_order.price if new_order.price else True
+
+    matching_orders = await session.execute(
+        select(OrderModel)
+        .where(OrderModel.ticker == user_data.ticker)
+        .where(OrderModel.direction == opposite_direction)
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(price_condition)
+        .order_by(*sorting_by)
+        .with_for_update()
+    )
+    matching_orders = matching_orders.scalars().all()
+
+    if price is None:
+        available_qty = sum(order.qty - order.filled for order in matching_orders)
+        if available_qty < new_order.qty:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='Insufficient liquidity for market order'
+            )
+
+    total_filled = 0
+    for matching_order in matching_orders:
+        if total_filled >= new_order.qty:
+            break
+
+        remaining_qty = new_order.qty - total_filled
+        match_qty = min(remaining_qty, matching_order.qty - matching_order.filled)
+        if match_qty <= 0:
+            continue
+
+        transaction_price = matching_order.price
+        if transaction_price is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail='Matching order has no price'
+            )
+
+        if new_order.direction == DirectionEnum.BUY:
+            await check_balance(session, current_user.id, 'RUB', match_qty * transaction_price)
+            await check_balance(session, matching_order.user_id, new_order.ticker, match_qty)
+        else:
+            await check_balance(session, current_user.id, new_order.ticker, match_qty)
+            await check_balance(session, matching_order.user_id, 'RUB', match_qty * transaction_price)
+
+        transaction = TransactionModel(
+            ticker=new_order.ticker,
+            amount=match_qty,
+            price=transaction_price,
+            timestamp=datetime.now(timezone.utc),
+            buyer_id=current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id,
+            seller_id=matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+        )
+        session.add(transaction)
+
+        matching_order.filled += match_qty
+        if matching_order.filled == matching_order.qty:
+            matching_order.status = StatusEnum.EXECUTED
+        else:
+            matching_order.status = StatusEnum.PARTIALLY_EXECUTED
+
+        total_filled += match_qty
+
+        buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
+        seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+
+        await update_balance(session, buyer, 'RUB', -match_qty * transaction_price)
+        await update_balance(session, seller, 'RUB', match_qty * transaction_price)
+        await update_balance(session, buyer, new_order.ticker, match_qty)
+        await update_balance(session, seller, new_order.ticker, -match_qty)
+
+    new_order.filled = total_filled
+    if total_filled == new_order.qty:
+        new_order.status = StatusEnum.EXECUTED
+    elif total_filled > 0 and price is not None:
+        new_order.status = StatusEnum.PARTIALLY_EXECUTED
+    else:
+        new_order.status = StatusEnum.NEW
+
+    if price is not None or new_order.status == StatusEnum.EXECUTED:
+        session.add(new_order)
+    await session.commit()
+
+    return CreateOrderResponseSchema(
+        success=True,
+        order_id=new_order.id,
+        filled_qty=new_order.filled,
+        status=new_order.status
+    )
+
 
 @order_router.get('/api/v1/order', response_model=list[OrderResponseSchema], tags=['order'])
 async def get_orders_list(
