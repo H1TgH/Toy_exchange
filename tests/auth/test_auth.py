@@ -1,5 +1,5 @@
 import pytest
-from src.auth.models import UserModel
+from src.users.models import UserModel
 from sqlalchemy import select
 
 @pytest.mark.asyncio

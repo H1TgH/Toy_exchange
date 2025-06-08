@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from uuid import UUID
 
 from src.database import SessionDep
 from src.users.models import UserModel 
@@ -34,7 +35,7 @@ async def register_user(
 @auth_router.delete('/api/v1/admin/user/{user_id}', response_model=UserRegistrationResponceSchema, tags=['admin', 'user'])
 async def delete_user(
     session: SessionDep,
-    user_id: str,
+    user_id: UUID,
     admin_user = Depends(get_current_admin)
 ):
     user = await session.scalar(select(UserModel).where(UserModel.id == user_id))
