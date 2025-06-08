@@ -189,7 +189,6 @@ async def create_order(
         status=new_order.status
     )
 
-
 @order_router.get('/api/v1/order', response_model=list[OrderResponseSchema], tags=['order'])
 async def get_orders_list(
     session: SessionDep,

@@ -26,6 +26,17 @@ async def create_instrument(
     session: SessionDep,
     admin_user = Depends(get_current_admin)
 ):
+    instrument = await session.scalar(
+        select(InstrumentModel)
+        .where(InstrumentModel.ticker == user_data.ticker)
+    )
+
+    if instrument:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Instrument already exists'
+        )
+    
     new_instrument = InstrumentModel(
         name = user_data.name,
         ticker = user_data.ticker,
@@ -43,7 +54,10 @@ async def delete_instrument(
     ticker: str,
     admin_user = Depends(get_current_admin)
 ):
-    instrument = await session.scalar(select(InstrumentModel).where(InstrumentModel.ticker == ticker))
+    instrument = await session.scalar(
+        select(InstrumentModel)
+        .where(InstrumentModel.ticker == ticker)
+    )
 
     if not instrument:
         raise HTTPException(
