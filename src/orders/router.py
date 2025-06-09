@@ -283,11 +283,13 @@ async def cancel_order(
     order_id: UUID,
     current_user: UserModel = Depends(get_current_user)
 ):
+    logger.info(f'Запрос на отмену ордера id={order_id} пользователем {current_user.id}')
     order = await session.scalar(
         select(OrderModel)
         .where(OrderModel.id == order_id)
     )
     if not order:
+        logger.warning(f'Ордер с id={order_id} не найден для отмены')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Order not found'
@@ -299,6 +301,7 @@ async def cancel_order(
         )
     
     if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
+        logger.warning(f'Невозможно отменить ордер id={order_id} со статусом {order.status}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail='Cannot cancel executed or partially executed order.'
@@ -310,20 +313,9 @@ async def cancel_order(
             detail='Cannot cancel market order'
         )
     
-    if order.status in [StatusEnum.EXECUTED or StatusEnum.PARTIALLY_EXECUTED]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Cannot cancel executed or partially executed order'
-        )
-    
-    if not order.price:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Cannot cancel market order'
-        )
-    
     order.status = StatusEnum.CANCELLED 
     await session.commit()
+    logger.info(f'Ордер id={order_id} отменен')
     return {'success': True}
 
 @order_router.get('/api/v1/public/orderbook/{ticker}', response_model=OrderBookListSchema, tags=['public'])
@@ -331,6 +323,7 @@ async def get_order_book(
     session: SessionDep,
     ticker: str
 ):
+    logger.info(f'Запрос стакана по тикеру {ticker}')
     bid_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
         .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
@@ -354,6 +347,7 @@ async def get_order_book(
     bid_levels = [{'price': price, 'qty': qty} for price, qty in bid_orders]
     ask_levels = [{'price': price, 'qty': qty} for price, qty in ask_orders]
 
+    logger.info(f'Получено {len(bid_levels)} бидов и {len(ask_levels)} асков для стакана {ticker}')
     return OrderBookListSchema(
         bid_levels=bid_levels,
         ask_levels=ask_levels
