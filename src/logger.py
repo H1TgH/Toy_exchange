@@ -4,6 +4,8 @@ from logging.handlers import RotatingFileHandler
 
 def setup_logging():
     logger = logging.getLogger('toy_exchange')
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
 
     formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(message)s',
@@ -19,7 +21,7 @@ def setup_logging():
     try:
         os.makedirs(log_dir, exist_ok=True)
     except OSError as e:
-        print(f'Failed to create log directory: {e}')
+        print(f'Не удалось создать директорию для логов: {e}')
         return logger
 
     log_file = os.path.join(log_dir, 'app.log')

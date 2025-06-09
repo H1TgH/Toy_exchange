@@ -6,13 +6,17 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - '8000:8000'
     depends_on:
       - db
+      - alembic
     environment:
       - DATABASE_URL=postgresql+asyncpg://birzha:birzha@db:5432/birzha
+      - PORT=8000
     command: >
-      gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.main:app --bind 0.0.0.0:8000
+      gunicorn -w 4 -k uvicorn.workers.UvicornWorker src.main:app --bind 0.0.0.0:8000 --log-level info
+    volumes:
+      - ./src/logs:/app/src/logs
     networks:
       - trading-network
 
@@ -33,7 +37,8 @@ services:
       - db
     environment:
       - DATABASE_URL=postgresql+asyncpg://birzha:birzha@db:5432/birzha
-    command: alembic upgrade head
+    command: >
+      sh -c 'python -c 'import psycopg2; import time; start = time.time(); while True: try: psycopg2.connect(\'dbname=birzha user=birzha password=birzha host=db\'); break; except: time.sleep(1); if time.time() - start > 10: raise Exception(\'DB timeout\')' && alembic upgrade head'
     networks:
       - trading-network
 
