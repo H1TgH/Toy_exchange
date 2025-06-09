@@ -70,7 +70,8 @@ async def create_order(
     user_data: OrderBodySchema,
     current_user: UserModel = Depends(get_current_user)
 ):
-    logger.info(f'Создание ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={getattr(user_data, 'price', None)}')
+    price = getattr(user_data, 'price', None)
+    logger.info(f'Создание ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={price}')
 
     if isinstance(user_data, LimitOrderBodySchema):
         price = user_data.price
