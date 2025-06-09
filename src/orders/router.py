@@ -291,6 +291,18 @@ async def cancel_order(
             detail='Cannot cancel market order'
         )
     
+    if order.status in [StatusEnum.EXECUTED or StatusEnum.PARTIALLY_EXECUTED]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel executed or partially executed order'
+        )
+    
+    if not order.price:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel market order'
+        )
+    
     order.status = StatusEnum.CANCELLED 
     await session.commit()
     return {'success': True}
