@@ -92,14 +92,14 @@ async def create_order(
                 select(BalanceModel)
                 .where(BalanceModel.user_id == current_user.id)
                 .where(BalanceModel.ticker == 'RUB')
-                .with_for_update()
+                .with_for_update(nowait=True)
             )
         else:
             balance = await session.scalar(
                 select(BalanceModel)
                 .where(BalanceModel.user_id == current_user.id)
                 .where(BalanceModel.ticker == user_data.ticker)
-                .with_for_update()
+                .with_for_update(nowait=True)
             )
 
         if isinstance(user_data, LimitOrderBodySchema):

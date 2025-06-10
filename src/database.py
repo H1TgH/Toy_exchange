@@ -7,6 +7,8 @@ from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from fastapi import Depends
+from src.logger import logger
+
 
 load_dotenv()
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -25,23 +27,25 @@ engine = create_async_engine(
     pool_timeout=30,  # Таймаут ожидания соединения из пула
     pool_recycle=1800,  # Пересоздание соединений каждые 30 минут
     pool_pre_ping=True,  # Проверка соединений перед использованием
-    isolation_level='REPEATABLE READ'  # Устанавливаем уровень изоляции
+    isolation_level='READ COMMITTED'  # Изменяем уровень изоляции
 )
 
-new_async_session = async_sessionmaker(
+async_session = async_sessionmaker(
     engine,
+    class_=AsyncSession,
     expire_on_commit=False,
     autocommit=False,
     autoflush=False
 )
 
 async def get_session():
-    async with new_async_session() as session:
+    async with async_session() as session:
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as e:
             await session.rollback()
+            logger.error(f"Ошибка в транзакции: {str(e)}", exc_info=True)
             raise
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
