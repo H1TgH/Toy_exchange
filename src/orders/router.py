@@ -145,8 +145,6 @@ async def create_order(
                 detail='Instrument not found'
             )
 
-        # Блокируем все подходящие ордера одним запросом
-        logger.debug(f'Поиск совпадающих ордеров: direction={opposite_direction}, price_condition={price_condition}')
         if user_data.direction == DirectionEnum.BUY:
             opposite_direction = DirectionEnum.SELL
             sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc())
@@ -163,7 +161,7 @@ async def create_order(
             .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
             .where(price_condition)
             .order_by(*sorting_by)
-            .with_for_update(skip_locked=True)  # Используем skip_locked для предотвращения дедлоков
+            .with_for_update(skip_locked=True)
         )
         matching_orders = matching_orders.scalars().all()
         logger.debug(f'Найдено {len(matching_orders)} подходящих ордеров')
