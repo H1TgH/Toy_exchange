@@ -23,29 +23,36 @@ async def check_balance(
     session: SessionDep, 
     user_id: UUID, 
     ticker: str, 
-    required_amount: int
+    required_amount: int,
+    reserve_amount: int = 0
 ):
-    logger.debug(f'Проверка баланса: user_id={user_id}, ticker={ticker}, required_amount={required_amount}')
+    logger.debug(f'Проверка баланса: user_id={user_id}, ticker={ticker}, требуется={required_amount}, резервировать={reserve_amount}')
     balance = await session.scalar(
         select(BalanceModel)
         .where(BalanceModel.user_id == user_id)
         .where(BalanceModel.ticker == ticker)
     )
-    if not balance or balance.amount < required_amount:
-        logger.warning(f'Недостаточный баланс для {ticker} у пользователя {user_id}')
+    if not balance or balance.available < required_amount:
+        logger.warning(f'Недостаточный доступный баланс для {ticker} у пользователя {user_id}: доступно={balance.available if balance else 0}, требуется={required_amount}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Insufficient balance for {ticker}'
         )
-    return True
+    
+    if reserve_amount > 0:
+        balance.available -= reserve_amount
+        logger.debug(f'Зарезервировано {reserve_amount} {ticker} для пользователя {user_id}, новый доступный баланс: {balance.available}')
+    
+    return balance
 
 async def update_balance(
     session: SessionDep, 
     user_id: UUID, 
     ticker: str, 
-    delta: float
+    delta_amount: float,
+    delta_available: float = None
 ):
-    logger.debug(f'Обновление баланса: user_id={user_id}, ticker={ticker}, delta={delta}')
+    logger.debug(f'Обновление баланса: user_id={user_id}, ticker={ticker}, delta_amount={delta_amount}, delta_available={delta_available}')
     balance = await session.scalar(
         select(BalanceModel)
         .where(BalanceModel.user_id == user_id)
@@ -53,20 +60,23 @@ async def update_balance(
     )
 
     if not balance:
-        logger.info(f'Баланс для {ticker} у пользователя {user_id} не найден, создаем новый с 0')
-        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0)
+        logger.info(f'Баланс для {ticker} у пользователя {user_id} не найден, создаем новый')
+        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)
         session.add(balance)
 
-    new_amount = balance.amount + delta
-    if new_amount < 0:
-        logger.error(f'Попытка установить отрицательный баланс для {ticker} у пользователя {user_id}')
+    new_amount = balance.amount + delta_amount
+    new_available = balance.available + (delta_available if delta_available is not None else delta_amount)
+    
+    if new_amount < 0 or new_available < 0:
+        logger.error(f'Попытка установить отрицательный баланс для {ticker} у пользователя {user_id}: amount={new_amount}, available={new_available}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f'Negative balance not allowed for {ticker}'
         )
     
     balance.amount = new_amount
-    logger.debug(f'Баланс для {ticker} у пользователя {user_id} обновлен: {new_amount}')
+    balance.available = new_available
+    logger.debug(f'Баланс для {ticker} у пользователя {user_id} обновлен: amount={new_amount}, available={new_available}')
 
 @order_router.post('/api/v1/order', response_model=CreateOrderResponseSchema, tags=['order'])
 async def create_order(
@@ -81,9 +91,9 @@ async def create_order(
         price = None
 
     if user_data.direction == DirectionEnum.BUY and price is not None:
-        await check_balance(session, current_user.id, 'RUB', user_data.qty * price)
+        await check_balance(session, current_user.id, 'RUB', user_data.qty * price, reserve_amount=user_data.qty * price)
     elif user_data.direction == DirectionEnum.SELL:
-        await check_balance(session, current_user.id, user_data.ticker, user_data.qty)
+        await check_balance(session, current_user.id, user_data.ticker, user_data.qty, reserve_amount=user_data.qty)
 
     new_order = OrderModel(
         user_id=current_user.id,
@@ -134,6 +144,10 @@ async def create_order(
                 detail='Insufficient liquidity for market order'
             )
 
+        if user_data.direction == DirectionEnum.BUY:
+            max_price = max(order.price for order in matching_orders)
+            await check_balance(session, current_user.id, 'RUB', user_data.qty * max_price, reserve_amount=user_data.qty * max_price)
+
     total_filled = 0
     for matching_order in matching_orders:
         if total_filled >= new_order.qty:
@@ -153,10 +167,8 @@ async def create_order(
             )
 
         if new_order.direction == DirectionEnum.BUY:
-            await check_balance(session, current_user.id, 'RUB', match_qty * transaction_price)
             await check_balance(session, matching_order.user_id, new_order.ticker, match_qty)
         else:
-            await check_balance(session, current_user.id, new_order.ticker, match_qty)
             await check_balance(session, matching_order.user_id, 'RUB', match_qty * transaction_price)
 
         transaction = TransactionModel(
@@ -180,10 +192,16 @@ async def create_order(
         buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
         seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
 
-        await update_balance(session, buyer, 'RUB', -match_qty * transaction_price)
-        await update_balance(session, seller, 'RUB', match_qty * transaction_price)
-        await update_balance(session, buyer, new_order.ticker, match_qty)
-        await update_balance(session, seller, new_order.ticker, -match_qty)
+        if new_order.direction == DirectionEnum.BUY:
+            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, -match_qty * transaction_price)
+            await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
+            await update_balance(session, seller, new_order.ticker, -match_qty, -match_qty)
+            await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
+        else:
+            await update_balance(session, seller, new_order.ticker, -match_qty, -match_qty)
+            await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
+            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, -match_qty * transaction_price)
+            await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
 
     new_order.filled = total_filled
     if total_filled == new_order.qty:
@@ -204,6 +222,52 @@ async def create_order(
         filled_qty=new_order.filled,
         status=new_order.status
     )
+
+@order_router.delete('/api/v1/order/{order_id}', response_model=OkResponseSchema, tags=['order'])
+async def cancel_order(
+    session: SessionDep,
+    order_id: UUID,
+    current_user: UserModel = Depends(get_current_user)
+):
+    logger.info(f'Запрос на отмену ордера id={order_id} пользователем {current_user.id}')
+    order = await session.scalar(
+        select(OrderModel)
+        .where(OrderModel.id == order_id)
+    )
+    if not order:
+        logger.warning(f'Ордер с id={order_id} не найден для отмены')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Order not found'
+        )
+    if order.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='You can only cancel your own orders'
+        )
+    
+    if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
+        logger.warning(f'Невозможно отменить ордер id={order_id} со статусом {order.status}')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel executed or partially executed order.'
+        )
+    
+    if not order.price:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel market order'
+        )
+    
+    if order.direction == DirectionEnum.BUY:
+        await update_balance(session, current_user.id, 'RUB', 0, (order.qty - order.filled) * order.price)
+    else:
+        await update_balance(session, current_user.id, order.ticker, 0, order.qty - order.filled)
+    
+    order.status = StatusEnum.CANCELLED 
+    await session.commit()
+    logger.info(f'Ордер id={order_id} отменен')
+    return {'success': True}
 
 @order_router.get('/api/v1/order', response_model=list[OrderResponseSchema], tags=['order'])
 async def get_orders_list(
@@ -276,47 +340,6 @@ async def get_order(
             timestamp=order.timestamp,
             body=MarketOrderBodySchema(**body_data)
         )
-
-@order_router.delete('/api/v1/order/{order_id}', response_model=OkResponseSchema, tags=['order'])
-async def cancel_order(
-    session: SessionDep,
-    order_id: UUID,
-    current_user: UserModel = Depends(get_current_user)
-):
-    logger.info(f'Запрос на отмену ордера id={order_id} пользователем {current_user.id}')
-    order = await session.scalar(
-        select(OrderModel)
-        .where(OrderModel.id == order_id)
-    )
-    if not order:
-        logger.warning(f'Ордер с id={order_id} не найден для отмены')
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Order not found'
-        )
-    if order.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail='You can only cancel your own orders'
-        )
-    
-    if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
-        logger.warning(f'Невозможно отменить ордер id={order_id} со статусом {order.status}')
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Cannot cancel executed or partially executed order.'
-        )
-    
-    if not order.price:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Cannot cancel market order'
-        )
-    
-    order.status = StatusEnum.CANCELLED 
-    await session.commit()
-    logger.info(f'Ордер id={order_id} отменен')
-    return {'success': True}
 
 @order_router.get('/api/v1/public/orderbook/{ticker}', response_model=OrderBookListSchema, tags=['public'])
 async def get_order_book(
