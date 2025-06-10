@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from fastapi import Depends
 
@@ -15,7 +16,16 @@ if not DATABASE_URL:
 if DATABASE_URL.startswith('postgresql://'):
     DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://', 1)
 
-engine = create_async_engine(DATABASE_URL, echo=True)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=True,
+    poolclass=AsyncAdaptedQueuePool,
+    pool_size=20,  # Максимальное количество соединений в пуле
+    max_overflow=10,  # Максимальное количество дополнительных соединений
+    pool_timeout=30,  # Таймаут ожидания соединения из пула
+    pool_recycle=1800,  # Пересоздание соединений каждые 30 минут
+    pool_pre_ping=True  # Проверка соединений перед использованием
+)
 
 new_async_session = async_sessionmaker(engine, expire_on_commit=False)
 
