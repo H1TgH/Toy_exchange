@@ -33,3 +33,8 @@ class BalanceModel(Base):
         Integer,
         nullable=False
     )
+
+    available: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
+    )
