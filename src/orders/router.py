@@ -166,11 +166,6 @@ async def create_order(
                 detail='Matching order has no price'
             )
 
-        if new_order.direction == DirectionEnum.BUY:
-            await check_balance(session, matching_order.user_id, new_order.ticker, match_qty)
-        else:
-            await check_balance(session, matching_order.user_id, 'RUB', match_qty * transaction_price)
-
         transaction = TransactionModel(
             ticker=new_order.ticker,
             amount=match_qty,
@@ -193,12 +188,12 @@ async def create_order(
         seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
 
         if new_order.direction == DirectionEnum.BUY:
-            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, -match_qty * transaction_price)
+            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, 0)
             await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
-            await update_balance(session, seller, new_order.ticker, -match_qty, -match_qty)
+            await update_balance(session, seller, new_order.ticker, -match_qty, 0)
             await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
         else:
-            await update_balance(session, seller, new_order.ticker, -match_qty, -match_qty)
+            await update_balance(session, seller, new_order.ticker, -match_qty, 0)
             await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
             await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, -match_qty * transaction_price)
             await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
