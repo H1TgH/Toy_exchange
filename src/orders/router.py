@@ -282,8 +282,9 @@ async def create_order(
             new_order.status = StatusEnum.NEW
             logger.debug(f'Новый ордер создан: filled={total_filled}/{new_order.qty}')
 
-        if price is not None or new_order.status == StatusEnum.EXECUTED:
-            session.add(new_order)
+        session.add(new_order)
+        await session.flush()
+        logger.debug(f'Новый ордер сохранен в базу данных с ID: {new_order.id}')
 
         logger.info(f'Ордер успешно создан: id={new_order.id}, filled={new_order.filled}, status={new_order.status}')
         return CreateOrderResponseSchema(
