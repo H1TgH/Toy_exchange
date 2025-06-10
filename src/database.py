@@ -24,14 +24,25 @@ engine = create_async_engine(
     max_overflow=10,  # Максимальное количество дополнительных соединений
     pool_timeout=30,  # Таймаут ожидания соединения из пула
     pool_recycle=1800,  # Пересоздание соединений каждые 30 минут
-    pool_pre_ping=True  # Проверка соединений перед использованием
+    pool_pre_ping=True,  # Проверка соединений перед использованием
+    isolation_level='REPEATABLE READ'  # Устанавливаем уровень изоляции
 )
 
-new_async_session = async_sessionmaker(engine, expire_on_commit=False)
+new_async_session = async_sessionmaker(
+    engine,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False
+)
 
 async def get_session():
     async with new_async_session() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
