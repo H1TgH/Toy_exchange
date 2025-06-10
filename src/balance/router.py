@@ -68,12 +68,14 @@ async def deposit_balance(
     
     if balance:
         balance.amount += balance_data.amount
+        balance.available += balance_data.amount
         logger.info(f'Баланс пользователя {balance_data.user_id} по тикеру {balance_data.ticker} увеличен на {balance_data.amount}')
     else:
         balance = BalanceModel(
             user_id=balance_data.user_id,
             ticker=balance_data.ticker,
-            amount=balance_data.amount
+            amount=balance_data.amount,
+            available=balance_data.amount
         )
         session.add(balance)
         logger.info(f'Создан новый баланс для пользователя {balance_data.user_id} по тикеру {balance_data.ticker} с суммой {balance_data.amount}')
