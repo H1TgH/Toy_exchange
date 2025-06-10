@@ -84,139 +84,144 @@ async def create_order(
     user_data: OrderBodySchema,
     current_user: UserModel = Depends(get_current_user)
 ):
-    logger.info(f'Создание ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={getattr(user_data, "price", None)}')
-    if isinstance(user_data, LimitOrderBodySchema):
-        price = user_data.price
-    else:
-        price = None
+    try:
+        logger.info(f'Создание ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={getattr(user_data, "price", None)}')
+        if isinstance(user_data, LimitOrderBodySchema):
+            price = user_data.price
+        else:
+            price = None
 
-    if user_data.direction == DirectionEnum.BUY and price is not None:
-        await check_balance(session, current_user.id, 'RUB', user_data.qty * price, reserve_amount=user_data.qty * price)
-    elif user_data.direction == DirectionEnum.SELL:
-        await check_balance(session, current_user.id, user_data.ticker, user_data.qty, reserve_amount=user_data.qty)
+        if user_data.direction == DirectionEnum.BUY and price is not None:
+            await check_balance(session, current_user.id, 'RUB', user_data.qty * price, reserve_amount=user_data.qty * price)
+        elif user_data.direction == DirectionEnum.SELL:
+            await check_balance(session, current_user.id, user_data.ticker, user_data.qty, reserve_amount=user_data.qty)
 
-    new_order = OrderModel(
-        user_id=current_user.id,
-        ticker=user_data.ticker,
-        direction=user_data.direction,
-        qty=user_data.qty,
-        price=price
-    )
-
-    instrument = await session.scalar(
-        select(InstrumentModel)
-        .where(InstrumentModel.ticker == user_data.ticker)
-    )
-    if not instrument:
-        logger.warning(f'Инструмент с тикером {user_data.ticker} не найден при создании ордера')
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Instrument not found'
+        new_order = OrderModel(
+            user_id=current_user.id,
+            ticker=user_data.ticker,
+            direction=user_data.direction,
+            qty=user_data.qty,
+            price=price
         )
 
-    if user_data.direction == DirectionEnum.BUY:
-        opposite_direction = DirectionEnum.SELL
-        sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc())
-        price_condition = OrderModel.price <= new_order.price if new_order.price else True
-    else:
-        opposite_direction = DirectionEnum.BUY
-        sorting_by = (OrderModel.price.desc(), OrderModel.timestamp.asc())
-        price_condition = OrderModel.price >= new_order.price if new_order.price else True
-
-    matching_orders = await session.execute(
-        select(OrderModel)
-        .where(OrderModel.ticker == user_data.ticker)
-        .where(OrderModel.direction == opposite_direction)
-        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
-        .where(price_condition)
-        .order_by(*sorting_by)
-        .with_for_update()
-    )
-    matching_orders = matching_orders.scalars().all()
-    logger.debug(f'Найдено {len(matching_orders)} подходящих ордеров')
-
-    if price is None:
-        available_qty = sum(order.qty - order.filled for order in matching_orders)
-        if available_qty < new_order.qty:
-            logger.warning('Недостаточная ликвидность для рыночного ордера')
+        instrument = await session.scalar(
+            select(InstrumentModel)
+            .where(InstrumentModel.ticker == user_data.ticker)
+        )
+        if not instrument:
+            logger.warning(f'Инструмент с тикером {user_data.ticker} не найден при создании ордера')
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail='Insufficient liquidity for market order'
+                detail='Instrument not found'
             )
 
         if user_data.direction == DirectionEnum.BUY:
-            max_price = max(order.price for order in matching_orders)
-            await check_balance(session, current_user.id, 'RUB', user_data.qty * max_price, reserve_amount=user_data.qty * max_price)
+            opposite_direction = DirectionEnum.SELL
+            sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc())
+            price_condition = OrderModel.price <= new_order.price if new_order.price else True
+        else:
+            opposite_direction = DirectionEnum.BUY
+            sorting_by = (OrderModel.price.desc(), OrderModel.timestamp.asc())
+            price_condition = OrderModel.price >= new_order.price if new_order.price else True
 
-    total_filled = 0
-    for matching_order in matching_orders:
-        if total_filled >= new_order.qty:
-            break
-
-        remaining_qty = new_order.qty - total_filled
-        match_qty = min(remaining_qty, matching_order.qty - matching_order.filled)
-        if match_qty <= 0:
-            continue
-
-        transaction_price = matching_order.price
-        if transaction_price is None:
-            logger.error('Совпадающий ордер не имеет цены')
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, 
-                detail='Matching order has no price'
-            )
-
-        transaction = TransactionModel(
-            ticker=new_order.ticker,
-            amount=match_qty,
-            price=transaction_price,
-            timestamp=datetime.now(timezone.utc),
-            buyer_id=current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id,
-            seller_id=matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+        logger.debug(f'Поиск совпадающих ордеров: direction={opposite_direction}, price_condition={price_condition}')
+        matching_orders = await session.execute(
+            select(OrderModel)
+            .where(OrderModel.ticker == user_data.ticker)
+            .where(OrderModel.direction == opposite_direction)
+            .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+            .where(price_condition)
+            .order_by(*sorting_by)
+            .with_for_update()
         )
-        session.add(transaction)
+        matching_orders = matching_orders.scalars().all()
+        logger.debug(f'Найдено {len(matching_orders)} подходящих ордеров')
 
-        matching_order.filled += match_qty
-        if matching_order.filled == matching_order.qty:
-            matching_order.status = StatusEnum.EXECUTED
+        if price is None:
+            available_qty = sum(order.qty - order.filled for order in matching_orders)
+            if available_qty < new_order.qty:
+                logger.warning('Недостаточная ликвидность для рыночного ордера')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Insufficient liquidity for market order'
+                )
+
+            if user_data.direction == DirectionEnum.BUY:
+                max_price = max(order.price for order in matching_orders)
+                await check_balance(session, current_user.id, 'RUB', user_data.qty * max_price, reserve_amount=user_data.qty * max_price)
+
+        total_filled = 0
+        for matching_order in matching_orders:
+            if total_filled >= new_order.qty:
+                break
+
+            remaining_qty = new_order.qty - total_filled
+            match_qty = min(remaining_qty, matching_order.qty - matching_order.filled)
+            if match_qty <= 0:
+                continue
+
+            transaction_price = matching_order.price
+            if transaction_price is None:
+                logger.error('Совпадающий ордер не имеет цены')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST, 
+                    detail='Matching order has no price'
+                )
+
+            transaction = TransactionModel(
+                ticker=new_order.ticker,
+                amount=match_qty,
+                price=transaction_price,
+                timestamp=datetime.now(timezone.utc),
+                buyer_id=current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id,
+                seller_id=matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+            )
+            session.add(transaction)
+
+            matching_order.filled += match_qty
+            if matching_order.filled == matching_order.qty:
+                matching_order.status = StatusEnum.EXECUTED
+            else:
+                matching_order.status = StatusEnum.PARTIALLY_EXECUTED
+
+            total_filled += match_qty
+
+            buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
+            seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+
+            if new_order.direction == DirectionEnum.BUY:
+                await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, 0)
+                await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
+                await update_balance(session, seller, new_order.ticker, -match_qty, 0)
+                await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
+            else:
+                await update_balance(session, seller, new_order.ticker, -match_qty, 0)
+                await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
+                await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, -match_qty * transaction_price)
+                await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
+
+        new_order.filled = total_filled
+        if total_filled == new_order.qty:
+            new_order.status = StatusEnum.EXECUTED
+        elif total_filled > 0 and price is not None:
+            new_order.status = StatusEnum.PARTIALLY_EXECUTED
         else:
-            matching_order.status = StatusEnum.PARTIALLY_EXECUTED
+            new_order.status = StatusEnum.NEW
 
-        total_filled += match_qty
+        if price is not None or new_order.status == StatusEnum.EXECUTED:
+            session.add(new_order)
+        await session.commit()
 
-        buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
-        seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
-
-        if new_order.direction == DirectionEnum.BUY:
-            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, 0)
-            await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
-            await update_balance(session, seller, new_order.ticker, -match_qty, 0)
-            await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
-        else:
-            await update_balance(session, seller, new_order.ticker, -match_qty, 0)
-            await update_balance(session, seller, 'RUB', match_qty * transaction_price, match_qty * transaction_price)
-            await update_balance(session, buyer, 'RUB', -match_qty * transaction_price, -match_qty * transaction_price)
-            await update_balance(session, buyer, new_order.ticker, match_qty, match_qty)
-
-    new_order.filled = total_filled
-    if total_filled == new_order.qty:
-        new_order.status = StatusEnum.EXECUTED
-    elif total_filled > 0 and price is not None:
-        new_order.status = StatusEnum.PARTIALLY_EXECUTED
-    else:
-        new_order.status = StatusEnum.NEW
-
-    if price is not None or new_order.status == StatusEnum.EXECUTED:
-        session.add(new_order)
-    await session.commit()
-
-    logger.info(f'Ордер создан: id={new_order.id}, filled={new_order.filled}, status={new_order.status}')
-    return CreateOrderResponseSchema(
-        success=True,
-        order_id=new_order.id,
-        filled_qty=new_order.filled,
-        status=new_order.status
-    )
+        logger.info(f'Ордер создан: id={new_order.id}, filled={new_order.filled}, status={new_order.status}')
+        return CreateOrderResponseSchema(
+            success=True,
+            order_id=new_order.id,
+            filled_qty=new_order.filled,
+            status=new_order.status
+        )
+    except Exception as e:
+        logger.error(f'Ошибка при создании ордера: {str(e)}', exc_info=True)
+        raise
 
 @order_router.delete('/api/v1/order/{order_id}', response_model=OkResponseSchema, tags=['order'])
 async def cancel_order(
@@ -344,7 +349,7 @@ async def get_order_book(
     logger.info(f'Запрос стакана по тикеру {ticker}')
     bid_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
-        .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
@@ -354,7 +359,7 @@ async def get_order_book(
 
     ask_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
-        .where(OrderModel.status.not_in([StatusEnum.CANCELLED, StatusEnum.EXECUTED]))
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
