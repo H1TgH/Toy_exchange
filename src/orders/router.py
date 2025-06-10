@@ -87,20 +87,18 @@ async def create_order(
     try:
         logger.info(f'Создание ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={getattr(user_data, "price", None)}')
         
+        balances = await session.scalars(
+            select(BalanceModel)
+            .where(BalanceModel.user_id == current_user.id)
+            .where(BalanceModel.ticker.in_(['RUB', user_data.ticker]))
+            .with_for_update()
+        )
+        balances = list(balances)
+        
         if user_data.direction == DirectionEnum.BUY:
-            balance = await session.scalar(
-                select(BalanceModel)
-                .where(BalanceModel.user_id == current_user.id)
-                .where(BalanceModel.ticker == 'RUB')
-                .with_for_update(nowait=True)
-            )
+            balance = next((b for b in balances if b.ticker == 'RUB'), None)
         else:
-            balance = await session.scalar(
-                select(BalanceModel)
-                .where(BalanceModel.user_id == current_user.id)
-                .where(BalanceModel.ticker == user_data.ticker)
-                .with_for_update(nowait=True)
-            )
+            balance = next((b for b in balances if b.ticker == user_data.ticker), None)
 
         if isinstance(user_data, LimitOrderBodySchema):
             price = user_data.price
@@ -227,49 +225,55 @@ async def create_order(
             seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
 
             logger.debug(f'Блокировка балансов участников сделки: buyer={buyer}, seller={seller}')
-            buyer_balance = await session.scalar(
+            
+            participant_balances = await session.scalars(
                 select(BalanceModel)
-                .where(BalanceModel.user_id == buyer)
+                .where(
+                    (BalanceModel.user_id == buyer) | 
+                    (BalanceModel.user_id == seller)
+                )
+                .where(BalanceModel.ticker.in_(['RUB', new_order.ticker]))
                 .with_for_update()
             )
-            seller_balance = await session.scalar(
-                select(BalanceModel)
-                .where(BalanceModel.user_id == seller)
-                .with_for_update()
-            )
+            participant_balances = list(participant_balances)
+
+            buyer_rub_balance = next((b for b in participant_balances if b.user_id == buyer and b.ticker == 'RUB'), None)
+            buyer_ticker_balance = next((b for b in participant_balances if b.user_id == buyer and b.ticker == new_order.ticker), None)
+            seller_rub_balance = next((b for b in participant_balances if b.user_id == seller and b.ticker == 'RUB'), None)
+            seller_ticker_balance = next((b for b in participant_balances if b.user_id == seller and b.ticker == new_order.ticker), None)
 
             if new_order.direction == DirectionEnum.BUY:
-                if not buyer_balance:
+                if not buyer_rub_balance:
                     logger.debug(f'Создание нового баланса RUB для покупателя {buyer}')
-                    buyer_balance = BalanceModel(user_id=buyer, ticker='RUB', amount=0, available=0)
-                    session.add(buyer_balance)
-                buyer_balance.amount -= match_qty * transaction_price
-                buyer_balance.available -= match_qty * transaction_price
-                logger.debug(f'Обновлен баланс RUB покупателя {buyer}: amount={buyer_balance.amount}, available={buyer_balance.available}')
+                    buyer_rub_balance = BalanceModel(user_id=buyer, ticker='RUB', amount=0, available=0)
+                    session.add(buyer_rub_balance)
+                buyer_rub_balance.amount -= match_qty * transaction_price
+                buyer_rub_balance.available -= match_qty * transaction_price
+                logger.debug(f'Обновлен баланс RUB покупателя {buyer}: amount={buyer_rub_balance.amount}, available={buyer_rub_balance.available}')
 
-                if not seller_balance:
+                if not seller_ticker_balance:
                     logger.debug(f'Создание нового баланса {new_order.ticker} для продавца {seller}')
-                    seller_balance = BalanceModel(user_id=seller, ticker=new_order.ticker, amount=0, available=0)
-                    session.add(seller_balance)
-                seller_balance.amount -= match_qty
-                seller_balance.available -= match_qty
-                logger.debug(f'Обновлен баланс {new_order.ticker} продавца {seller}: amount={seller_balance.amount}, available={seller_balance.available}')
+                    seller_ticker_balance = BalanceModel(user_id=seller, ticker=new_order.ticker, amount=0, available=0)
+                    session.add(seller_ticker_balance)
+                seller_ticker_balance.amount -= match_qty
+                seller_ticker_balance.available -= match_qty
+                logger.debug(f'Обновлен баланс {new_order.ticker} продавца {seller}: amount={seller_ticker_balance.amount}, available={seller_ticker_balance.available}')
             else:
-                if not seller_balance:
+                if not seller_ticker_balance:
                     logger.debug(f'Создание нового баланса {new_order.ticker} для продавца {seller}')
-                    seller_balance = BalanceModel(user_id=seller, ticker=new_order.ticker, amount=0, available=0)
-                    session.add(seller_balance)
-                seller_balance.amount -= match_qty
-                seller_balance.available -= match_qty
-                logger.debug(f'Обновлен баланс {new_order.ticker} продавца {seller}: amount={seller_balance.amount}, available={seller_balance.available}')
+                    seller_ticker_balance = BalanceModel(user_id=seller, ticker=new_order.ticker, amount=0, available=0)
+                    session.add(seller_ticker_balance)
+                seller_ticker_balance.amount -= match_qty
+                seller_ticker_balance.available -= match_qty
+                logger.debug(f'Обновлен баланс {new_order.ticker} продавца {seller}: amount={seller_ticker_balance.amount}, available={seller_ticker_balance.available}')
 
-                if not buyer_balance:
+                if not buyer_rub_balance:
                     logger.debug(f'Создание нового баланса RUB для покупателя {buyer}')
-                    buyer_balance = BalanceModel(user_id=buyer, ticker='RUB', amount=0, available=0)
-                    session.add(buyer_balance)
-                buyer_balance.amount -= match_qty * transaction_price
-                buyer_balance.available -= match_qty * transaction_price
-                logger.debug(f'Обновлен баланс RUB покупателя {buyer}: amount={buyer_balance.amount}, available={buyer_balance.available}')
+                    buyer_rub_balance = BalanceModel(user_id=buyer, ticker='RUB', amount=0, available=0)
+                    session.add(buyer_rub_balance)
+                buyer_rub_balance.amount -= match_qty * transaction_price
+                buyer_rub_balance.available -= match_qty * transaction_price
+                logger.debug(f'Обновлен баланс RUB покупателя {buyer}: amount={buyer_rub_balance.amount}, available={buyer_rub_balance.available}')
 
         new_order.filled = total_filled
         if total_filled == new_order.qty:
