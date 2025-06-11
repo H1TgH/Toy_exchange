@@ -218,7 +218,8 @@ async def create_order(
                 if ticker == 'RUB':
                     if user_id == buyer:
                         balance.amount -= match_qty * transaction_price
-                        balance.available -= match_qty * transaction_price
+                        if user_id != current_user.id:
+                            balance.available -= match_qty * transaction_price
                     else:
                         balance.amount += match_qty * transaction_price
                         balance.available += match_qty * transaction_price
@@ -228,7 +229,8 @@ async def create_order(
                         balance.available += match_qty
                     else:
                         balance.amount -= match_qty
-                        balance.available -= match_qty
+                        if user_id != current_user.id:
+                            balance.available -= match_qty
 
             transaction = TransactionModel(
                 ticker=new_order.ticker,
