@@ -1,6 +1,6 @@
 from uuid import uuid4
 
-from sqlalchemy import String, Integer, ForeignKey
+from sqlalchemy import String, Integer, ForeignKey, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 
@@ -37,4 +37,8 @@ class BalanceModel(Base):
     available: Mapped[int] = mapped_column(
         Integer,
         nullable=False
+    )
+
+    __table_args__ = (
+        Index('index_balance_user_ticker', 'user_id', 'ticker'),
     )
