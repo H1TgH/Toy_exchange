@@ -28,7 +28,7 @@ async def update_balance(
     logger.debug(f'[UPDATE_BALANCE] Обновление баланса: user_id={user_id}, ticker={ticker}, delta_amount={delta_amount}, delta_available={delta_available}')
     balance = await session.scalar(
         select(BalanceModel)
-        .where(BalanceModel.user_id == user_id)
+        .where(BalanceModel.user_id == UUID(user_id))
         .where(BalanceModel.ticker == ticker)
         .order_by(BalanceModel.user_id, BalanceModel.ticker)
         .with_for_update()
@@ -36,8 +36,9 @@ async def update_balance(
 
     if not balance:
         logger.info(f'Баланс для {ticker} у пользователя {user_id} не найден, создаем новый')
-        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)
+        balance = BalanceModel(user_id=UUID(user_id), ticker=ticker, amount=0, available=0)
         session.add(balance)
+        await session.flush()  # Сохраняем новый баланс сразу
 
     new_amount = balance.amount + delta_amount
     new_available = balance.available + (delta_available if delta_available is not None else delta_amount)
@@ -98,7 +99,6 @@ async def create_order(
                     detail='Insufficient liquidity for market order'
                 )
 
-        # Основной блок с блокировками
         new_order = OrderModel(
             user_id=current_user.id,
             ticker=user_data.ticker,
@@ -141,7 +141,6 @@ async def create_order(
         all_balances = list(all_balances)
         logger.info(f'[POST /api/v1/order] Балансы участников: {[(b.user_id, b.ticker, b.amount, b.available) for b in all_balances]}')
 
-        # Проверяем балансы текущего пользователя
         rub_balance = next((b for b in all_balances if b.user_id == current_user.id and b.ticker == 'RUB'), None)
         ticker_balance = next((b for b in all_balances if b.user_id == current_user.id and b.ticker == new_order.ticker), None)
         logger.info(f'[POST /api/v1/order] RUB баланс: amount={rub_balance.amount if rub_balance else 0}, available={rub_balance.available if rub_balance else 0}')
@@ -169,7 +168,6 @@ async def create_order(
             ticker_balance.available -= user_data.qty
             logger.info(f'[POST /api/v1/order] Зарезервировано {new_order.ticker}: {user_data.qty}, новый доступный баланс: {ticker_balance.available}')
 
-        # Исполнение сделок
         total_filled = 0
         for matching_order in matching_orders:
             if total_filled >= new_order.qty:
@@ -188,15 +186,16 @@ async def create_order(
                     detail='Matching order has no price'
                 )
 
-            buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
-            seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+            buyer = UUID(current_user.id) if new_order.direction == DirectionEnum.BUY else UUID(matching_order.user_id)
+            seller = UUID(matching_order.user_id) if new_order.direction == DirectionEnum.BUY else UUID(current_user.id)
             logger.info(f'[POST /api/v1/order] Исполнение сделки: buyer={buyer}, seller={seller}, qty={match_qty}, price={transaction_price}')
 
             for user_id, ticker in [(buyer, 'RUB'), (buyer, new_order.ticker), (seller, 'RUB'), (seller, new_order.ticker)]:
-                balance = next((b for b in all_balances if b.user_id == user_id and b.ticker == ticker), None)
+                balance = next((b for b in all_balances if b.user_id == UUID(user_id) and b.ticker == ticker), None)
                 if not balance:
-                    balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)
+                    balance = BalanceModel(user_id=UUID(user_id), ticker=ticker, amount=0, available=0)
                     session.add(balance)
+                    await session.flush()
                     all_balances.append(balance)
                     logger.info(f'[POST /api/v1/order] Создан новый баланс: user_id={user_id}, ticker={ticker}')
 
@@ -226,6 +225,7 @@ async def create_order(
                 seller_id=seller
             )
             session.add(transaction)
+            await session.flush()
             logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
 
             matching_order.filled += match_qty
@@ -269,50 +269,50 @@ async def cancel_order(
     current_user: UserModel = Depends(get_current_user)
 ):
     logger.info(f'[DELETE /api/v1/order/{order_id}] Запрос на отмену ордера: order_id={order_id}, user_id={current_user.id}')
-    async with session.begin():
-        order = await session.scalar(
-            select(OrderModel)
-            .where(OrderModel.id == order_id)
-            .order_by(OrderModel.user_id, OrderModel.ticker)
-            .with_for_update()
+    
+    order = await session.scalar(
+        select(OrderModel)
+        .where(OrderModel.id == order_id)
+        .order_by(OrderModel.user_id, OrderModel.ticker)
+        .with_for_update()
+    )
+    if not order:
+        logger.warning(f'[DELETE /api/v1/order/{order_id}] Ордер не найден: order_id={order_id}')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Order not found'
         )
-        if not order:
-            logger.warning(f'[DELETE /api/v1/order/{order_id}] Ордер не найден: order_id={order_id}')
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='Order not found'
-            )
-        if order.user_id != current_user.id:
-            logger.warning(f'[DELETE /api/v1/order/{order_id}] Попытка отменить чужой ордер: order_id={order_id}, user_id={current_user.id}, owner_id={order.user_id}')
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail='You can only cancel your own orders'
-            )
-        
-        if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
-            logger.warning(f'[DELETE /api/v1/order/{order_id}] Невозможно отменить исполненный ордер: order_id={order_id}, status={order.status}')
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='Cannot cancel executed or partially executed order.'
-            )
-        
-        if not order.price:
-            logger.warning(f'[DELETE /api/v1/order/{order_id}] Невозможно отменить рыночный ордер: order_id={order_id}')
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail='Cannot cancel market order'
-            )
-        
-        logger.info(f'[DELETE /api/v1/order/{order_id}] Получение балансов для отмены: user_id={current_user.id}, ticker={order.ticker}')
-        if order.direction == DirectionEnum.BUY:
-            await update_balance(session, current_user.id, 'RUB', 0, (order.qty - order.filled) * order.price)
-            logger.info(f'[DELETE /api/v1/order/{order_id}] Возвращены RUB: amount={(order.qty - order.filled) * order.price}')
-        else:
-            await update_balance(session, current_user.id, order.ticker, 0, order.qty - order.filled)
-            logger.info(f'[DELETE /api/v1/order/{order_id}] Возвращен {order.ticker}: amount={order.qty - order.filled}')
-        
-        order.status = StatusEnum.CANCELLED 
-        logger.info(f'[DELETE /api/v1/order/{order_id}] Ордер успешно отменен: order_id={order_id}')
+    if order.user_id != current_user.id:
+        logger.warning(f'[DELETE /api/v1/order/{order_id}] Попытка отменить чужой ордер: order_id={order_id}, user_id={current_user.id}, owner_id={order.user_id}')
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='You can only cancel your own orders'
+        )
+    
+    if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
+        logger.warning(f'[DELETE /api/v1/order/{order_id}] Невозможно отменить исполненный ордер: order_id={order_id}, status={order.status}')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel executed or partially executed order.'
+        )
+    
+    if not order.price:
+        logger.warning(f'[DELETE /api/v1/order/{order_id}] Невозможно отменить рыночный ордер: order_id={order_id}')
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail='Cannot cancel market order'
+        )
+    
+    logger.info(f'[DELETE /api/v1/order/{order_id}] Получение балансов для отмены: user_id={current_user.id}, ticker={order.ticker}')
+    if order.direction == DirectionEnum.BUY:
+        await update_balance(session, current_user.id, 'RUB', 0, (order.qty - order.filled) * order.price)
+        logger.info(f'[DELETE /api/v1/order/{order_id}] Возвращены RUB: amount={(order.qty - order.filled) * order.price}')
+    else:
+        await update_balance(session, current_user.id, order.ticker, 0, order.qty - order.filled)
+        logger.info(f'[DELETE /api/v1/order/{order_id}] Возвращен {order.ticker}: amount={order.qty - order.filled}')
+    
+    order.status = StatusEnum.CANCELLED 
+    logger.info(f'[DELETE /api/v1/order/{order_id}] Ордер успешно отменен: order_id={order_id}')
     return {'success': True}
 
 @order_router.get('/api/v1/order', response_model=list[OrderResponseSchema], tags=['order'])
