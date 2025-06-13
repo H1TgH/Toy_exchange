@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func
-from sqlalchemy.exc import SQLAlchemyError
 
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
