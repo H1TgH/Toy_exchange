@@ -18,7 +18,11 @@ async def register_user(
     session: SessionDep
 ):
     try:
+        logger.info(f'[POST /api/v1/public/register] Начало регистрации пользователя: name={user_data.name}')
+        
         new_user_api_key = generate_api_key()
+        logger.debug(f'[POST /api/v1/public/register] Сгенерирован API ключ для пользователя: name={user_data.name}')
+        
         new_user = UserModel(
             name=user_data.name,
             api_key=new_user_api_key
@@ -26,8 +30,7 @@ async def register_user(
 
         session.add(new_user)
         await session.commit()
-
-        logger.info(f'Пользователь создан: id={new_user.id}, name={new_user.name}')
+        logger.info(f'[POST /api/v1/public/register] Пользователь успешно создан: id={new_user.id}, name={new_user.name}, role={new_user.role}')
 
         return {
             'id': new_user.id,
@@ -36,7 +39,7 @@ async def register_user(
             'api_key': new_user_api_key
         }
     except Exception as e:
-        logger.error(f'Ошибка при регистрации пользователя {user_data.name}: {e}', exc_info=True)
+        logger.error(f'[POST /api/v1/public/register] Ошибка при регистрации пользователя: name={user_data.name}, error={str(e)}', exc_info=True)
         raise
 
 @auth_router.delete('/api/v1/admin/user/{user_id}', response_model=UserRegistrationResponceSchema, tags=['admin', 'user'])
@@ -45,25 +48,35 @@ async def delete_user(
     user_id: UUID,
     admin_user=Depends(get_current_admin)
 ):
-    user = await session.scalar(select(UserModel).where(UserModel.id == user_id))
+    try:
+        logger.info(f'[DELETE /api/v1/admin/user/{user_id}] Начало удаления пользователя: user_id={user_id}, admin_id={admin_user.id}, admin_email={admin_user.email}')
+        
+        user = await session.scalar(select(UserModel).where(UserModel.id == user_id))
 
-    if not user:
-        logger.warning(f'Попытка удаления несуществующего пользователя: id={user_id}')
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='User not found'
-        )
-    
-    deleted_user_data = {
-        'id': str(user.id),
-        'name': user.name,
-        'role': user.role,
-        'api_key': user.api_key,
-    }
-    
-    await session.delete(user)
-    await session.commit()
+        if not user:
+            logger.warning(f'[DELETE /api/v1/admin/user/{user_id}] Попытка удаления несуществующего пользователя')
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail='User not found'
+            )
+        
+        logger.info(f'[DELETE /api/v1/admin/user/{user_id}] Пользователь найден: name={user.name}, role={user.role}')
+        
+        deleted_user_data = {
+            'id': str(user.id),
+            'name': user.name,
+            'role': user.role,
+            'api_key': user.api_key,
+        }
+        
+        await session.delete(user)
+        await session.commit()
 
-    logger.info(f'Пользователь удалён: id={user_id}, name={user.name}')
+        logger.info(f'[DELETE /api/v1/admin/user/{user_id}] Пользователь успешно удалён: name={user.name}, role={user.role}')
 
-    return deleted_user_data
+        return deleted_user_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f'[DELETE /api/v1/admin/user/{user_id}] Ошибка при удалении пользователя: error={str(e)}', exc_info=True)
+        raise
