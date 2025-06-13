@@ -19,38 +19,13 @@ from src.logger import logger
 
 order_router = APIRouter()
 
-async def check_balance(
-    session: SessionDep, 
-    user_id: UUID, 
-    ticker: str, 
-    required_amount: int,
-    reserve_amount: int = 0
-):
-    logger.debug(f'Проверка баланса: user_id={user_id}, ticker={ticker}, требуется={required_amount}, резервировать={reserve_amount}')
-    balance = await session.scalar(
-        select(BalanceModel)
-        .where(BalanceModel.user_id == user_id)
-        .where(BalanceModel.ticker == ticker)
-    )
-    if not balance or balance.available < required_amount:
-        logger.warning(f'Недостаточный доступный баланс для {ticker} у пользователя {user_id}: доступно={balance.available if balance else 0}, требуется={required_amount}')
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f'Insufficient balance for {ticker}'
-        )
-    
-    if reserve_amount > 0:
-        balance.available -= reserve_amount
-        logger.debug(f'Зарезервировано {reserve_amount} {ticker} для пользователя {user_id}, новый доступный баланс: {balance.available}')
-    
-    return balance
 
 async def update_balance(
     session: SessionDep, 
     user_id: UUID, 
     ticker: str, 
-    delta_amount: float,
-    delta_available: float = None
+    delta_amount: int,
+    delta_available: int = None
 ):
     logger.debug(f'Обновление баланса: user_id={user_id}, ticker={ticker}, delta_amount={delta_amount}, delta_available={delta_available}')
     balance = await session.scalar(
@@ -217,20 +192,22 @@ async def create_order(
 
                 if ticker == 'RUB':
                     if user_id == buyer:
+                        # Покупатель отдает деньги
                         balance.amount -= match_qty * transaction_price
-                        if user_id != current_user.id:
-                            balance.available -= match_qty * transaction_price
+                        # Не меняем available, так как деньги уже зарезервированы
                     else:
+                        # Продавец получает деньги
                         balance.amount += match_qty * transaction_price
                         balance.available += match_qty * transaction_price
                 else:
                     if user_id == buyer:
+                        # Покупатель получает инструмент
                         balance.amount += match_qty
                         balance.available += match_qty
                     else:
+                        # Продавец отдает инструмент
                         balance.amount -= match_qty
-                        if user_id != current_user.id:
-                            balance.available -= match_qty
+                        # Не меняем available, так как инструмент уже зарезервирован
 
             transaction = TransactionModel(
                 ticker=new_order.ticker,
