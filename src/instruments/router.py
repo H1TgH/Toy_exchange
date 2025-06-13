@@ -34,7 +34,7 @@ async def create_instrument(
     admin_user = Depends(get_current_admin)
 ):
     try:
-        logger.info(f'[POST /api/v1/admin/instrument] Админ {admin_user.id} (email: {admin_user.email}) инициировал создание инструмента: ticker={user_data.ticker}, name={user_data.name}')
+        logger.info(f'[POST /api/v1/admin/instrument] Админ {admin_user.id} инициировал создание инструмента: ticker={user_data.ticker}, name={user_data.name}')
         
         instrument = await session.scalar(
             select(InstrumentModel)
@@ -69,7 +69,7 @@ async def delete_instrument(
     admin_user = Depends(get_current_admin)
 ):
     try:
-        logger.info(f'[DELETE /api/v1/admin/instrument/{ticker}] Админ {admin_user.id} (email: {admin_user.email}) инициировал удаление инструмента: ticker={ticker}')
+        logger.info(f'[DELETE /api/v1/admin/instrument/{ticker}] Админ {admin_user.id} инициировал удаление инструмента: ticker={ticker}')
         
         instrument = await session.scalar(
             select(InstrumentModel)

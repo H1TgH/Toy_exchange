@@ -18,7 +18,7 @@ async def get_balances(
     session: SessionDep,
     current_user: UserModel = Depends(get_current_user)
 ):
-    logger.info(f'[GET /api/v1/balance] Начало запроса балансов для пользователя {current_user.id} (email: {current_user.email})')
+    logger.info(f'[GET /api/v1/balance] Начало запроса балансов для пользователя {current_user.id}')
     try:
         balances = await session.scalars(
             select(BalanceModel)
@@ -37,7 +37,7 @@ async def deposit_balance(
     session: SessionDep,
     current_admin: UserModel = Depends(get_current_admin)
 ):
-    logger.info(f'[POST /api/v1/admin/balance/deposit] Админ {current_admin.id} (email: {current_admin.email}) инициировал пополнение баланса: user_id={balance_data.user_id}, ticker={balance_data.ticker}, amount={balance_data.amount}')
+    logger.info(f'[POST /api/v1/admin/balance/deposit] Админ {current_admin.id}) инициировал пополнение баланса: user_id={balance_data.user_id}, ticker={balance_data.ticker}, amount={balance_data.amount}')
     
     try:
         user = await session.scalar(
@@ -52,7 +52,7 @@ async def deposit_balance(
                 detail='Invalid user_id value'
             )
 
-        logger.info(f'[POST /api/v1/admin/balance/deposit] Найден пользователь: id={user.id}, email={user.email}')
+        logger.info(f'[POST /api/v1/admin/balance/deposit] Найден пользователь: id={user.id}')
 
         ticker = await session.scalar(
             select(InstrumentModel)
@@ -103,7 +103,7 @@ async def withdraw_balance(
     session: SessionDep,
     current_admin: UserModel = Depends(get_current_admin)
 ):
-    logger.info(f'[POST /api/v1/admin/balance/withdraw] Админ {current_admin.id} (email: {current_admin.email}) инициировал списание баланса: user_id={balance_data.user_id}, ticker={balance_data.ticker}, amount={balance_data.amount}')
+    logger.info(f'[POST /api/v1/admin/balance/withdraw] Админ {current_admin.id} инициировал списание баланса: user_id={balance_data.user_id}, ticker={balance_data.ticker}, amount={balance_data.amount}')
     
     try:
         user = await session.scalar(
@@ -118,7 +118,7 @@ async def withdraw_balance(
                 detail='User not found'
             )
 
-        logger.info(f'[POST /api/v1/admin/balance/withdraw] Найден пользователь: id={user.id}, email={user.email}')
+        logger.info(f'[POST /api/v1/admin/balance/withdraw] Найден пользователь: id={user.id}')
 
         balance = await session.scalar(
             select(BalanceModel)

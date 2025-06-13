@@ -49,7 +49,7 @@ async def delete_user(
     admin_user=Depends(get_current_admin)
 ):
     try:
-        logger.info(f'[DELETE /api/v1/admin/user/{user_id}] Начало удаления пользователя: user_id={user_id}, admin_id={admin_user.id}, admin_email={admin_user.email}')
+        logger.info(f'[DELETE /api/v1/admin/user/{user_id}] Начало удаления пользователя: user_id={user_id}, admin_id={admin_user.id}')
         
         user = await session.scalar(select(UserModel).where(UserModel.id == user_id))
 
