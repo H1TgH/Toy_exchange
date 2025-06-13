@@ -227,6 +227,17 @@ async def create_order(
             await session.flush()
             logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
 
+            matching_order.filled += match_qty
+            if matching_order.filled == matching_order.qty:
+                matching_order.status = StatusEnum.EXECUTED
+                logger.info(f'[POST /api/v1/order] Ордер полностью исполнен: id={matching_order.id}')
+            else:
+                matching_order.status = StatusEnum.PARTIALLY_EXECUTED
+                logger.info(f'[POST /api/v1/order] Ордер частично исполнен: id={matching_order.id}, filled={matching_order.filled}')
+
+            total_filled += match_qty
+            logger.info(f'[POST /api/v1/order] Текущий прогресс исполнения: total_filled={total_filled}')
+
         new_order.filled = total_filled
         if total_filled == new_order.qty:
             new_order.status = StatusEnum.EXECUTED
@@ -261,7 +272,6 @@ async def cancel_order(
     order = await session.scalar(
         select(OrderModel)
         .where(OrderModel.id == order_id)
-        .order_by(OrderModel.user_id, OrderModel.ticker)
         .with_for_update()
     )
     if not order:
@@ -277,11 +287,11 @@ async def cancel_order(
             detail='You can only cancel your own orders'
         )
     
-    if order.status in [StatusEnum.PARTIALLY_EXECUTED, StatusEnum.EXECUTED]:
-        logger.warning(f'[DELETE /api/v1/order/{order_id}] Невозможно отменить исполненный ордер: order_id={order_id}, status={order.status}')
+    if order.status in [StatusEnum.EXECUTED, StatusEnum.CANCELLED]:
+        logger.warning(f'[DELETE /api/v1/order/{order_id}] Невозможно отменить исполненный или отмененный ордер: order_id={order_id}, status={order.status}')
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Cannot cancel executed or partially executed order.'
+            detail='Cannot cancel executed or cancelled order.'
         )
     
     if not order.price:
@@ -392,7 +402,7 @@ async def get_order_book(
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Запрос стакана: ticker={ticker}')
     bid_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
-        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(OrderModel.status == StatusEnum.NEW)
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
@@ -402,7 +412,7 @@ async def get_order_book(
 
     ask_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
-        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+        .where(OrderModel.status == StatusEnum.NEW)
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
