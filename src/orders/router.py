@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from src.database import SessionDep
 from src.schemas import OkResponseSchema
 from src.orders.models import OrderModel, StatusEnum, DirectionEnum
-from src.orders.schemas import OrderBodySchema, CreateOrderResponseSchema, OrderResponseSchema, LimitOrderSchema, LimitOrderBodySchema, MarketOrderSchema, MarketOrderBodySchema, OrderBookListSchema
+from src.orders.schemas import OrderBodySchema, CreateOrderResponseSchema, OrderResponseSchema, LimitOrderSchema, LimitOrderBodySchema, MarketOrderSchema, MarketOrderBodySchema, OrderBookListSchema, OrderLevel
 from src.users.dependencies import get_current_user
 from src.users.models import UserModel
 from src.instruments.models import InstrumentModel
@@ -201,7 +201,6 @@ async def create_order(
                     if ticker == 'RUB':
                         if user_id == buyer:
                             balance.amount -= match_qty * transaction_price
-                            balance.available -= match_qty * transaction_price
                             logger.info(f'[POST /api/v1/order] Обновление баланса RUB покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
                         else:
                             balance.amount += match_qty * transaction_price
@@ -214,7 +213,6 @@ async def create_order(
                             logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
                         else:
                             balance.amount -= match_qty
-                            balance.available -= match_qty
                             logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
 
                 matching_order.filled += match_qty
@@ -437,8 +435,8 @@ async def get_order_book(
         .order_by(OrderModel.price.asc())
     )
 
-    bid_levels = [{'price': price, 'qty': qty} for price, qty in bid_orders if qty > 0]
-    ask_levels = [{'price': price, 'qty': qty} for price, qty in ask_orders if qty > 0]
+    bid_levels = [OrderLevel(price=price, qty=qty) for price, qty in bid_orders if qty > 0]
+    ask_levels = [OrderLevel(price=price, qty=qty) for price, qty in ask_orders if qty > 0]
 
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Стакан {ticker}:')
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Бид уровни: {bid_levels}')
