@@ -30,6 +30,8 @@ async def update_balance(
         select(BalanceModel)
         .where(BalanceModel.user_id == user_id)
         .where(BalanceModel.ticker == ticker)
+        .order_by(BalanceModel.user_id, BalanceModel.ticker)
+        .with_for_update()
     )
 
     if not balance:
@@ -60,6 +62,7 @@ async def create_order(
     try:
         logger.info(f'[POST /api/v1/order] Начало создания ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={getattr(user_data, "price", None)}')
 
+        # Проверяем инструмент
         instrument = await session.scalar(
             select(InstrumentModel)
             .where(InstrumentModel.ticker == user_data.ticker)
@@ -75,176 +78,177 @@ async def create_order(
         price = user_data.price if isinstance(user_data, LimitOrderBodySchema) else None
         logger.info(f'[POST /api/v1/order] Тип ордера: {"LIMIT" if price else "MARKET"}, price={price}')
 
-        async with session.begin():
-            balances = await session.scalars(
-                select(BalanceModel)
-                .where(BalanceModel.user_id == current_user.id)
-                .where(BalanceModel.ticker.in_(['RUB', user_data.ticker]))
-                .order_by(BalanceModel.user_id, BalanceModel.ticker)
-                .with_for_update()
-            )
-            balances = list(balances)
-            logger.info(f'[POST /api/v1/order] Получены балансы пользователя: {[(b.ticker, b.amount, b.available) for b in balances]}')
-
-            rub_balance = next((b for b in balances if b.ticker == 'RUB'), None)
-            ticker_balance = next((b for b in balances if b.ticker == user_data.ticker), None)
-            logger.info(f'[POST /api/v1/order] RUB баланс: amount={rub_balance.amount if rub_balance else 0}, available={rub_balance.available if rub_balance else 0}')
-            logger.info(f'[POST /api/v1/order] {user_data.ticker} баланс: amount={ticker_balance.amount if ticker_balance else 0}, available={ticker_balance.available if ticker_balance else 0}')
-
-            if user_data.direction == DirectionEnum.BUY:
-                if price is not None:
-                    required_rub = user_data.qty * price
-                    logger.info(f'[POST /api/v1/order] Требуется RUB для покупки: {required_rub}')
-                    if not rub_balance or rub_balance.available < required_rub:
-                        logger.warning(f'[POST /api/v1/order] Недостаточно RUB: доступно={rub_balance.available if rub_balance else 0}, требуется={required_rub}')
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=f'Insufficient balance for RUB'
-                        )
-                    rub_balance.available -= required_rub
-                    logger.info(f'[POST /api/v1/order] Зарезервировано RUB: {required_rub}, новый доступный баланс: {rub_balance.available}')
-            else:
-                if not ticker_balance or ticker_balance.available < user_data.qty:
-                    logger.warning(f'[POST /api/v1/order] Недостаточно {user_data.ticker}: доступно={ticker_balance.available if ticker_balance else 0}, требуется={user_data.qty}')
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f'Insufficient balance for {user_data.ticker}'
-                    )
-                ticker_balance.available -= user_data.qty
-                logger.info(f'[POST /api/v1/order] Зарезервировано {user_data.ticker}: {user_data.qty}, новый доступный баланс: {ticker_balance.available}')
-
-            new_order = OrderModel(
-                user_id=current_user.id,
-                ticker=user_data.ticker,
-                direction=user_data.direction,
-                qty=user_data.qty,
-                price=price
-            )
-            session.add(new_order)
-            await session.flush()
-            logger.info(f'[POST /api/v1/order] Создан новый ордер: id={new_order.id}, direction={new_order.direction}, qty={new_order.qty}, price={new_order.price}')
-
+        # Проверяем ликвидность для рыночного ордера без блокировки
+        if price is None:
             opposite_direction = DirectionEnum.SELL if user_data.direction == DirectionEnum.BUY else DirectionEnum.BUY
-            sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc()) if user_data.direction == DirectionEnum.BUY else (OrderModel.price.desc(), OrderModel.timestamp.asc())
-            price_condition = OrderModel.price <= new_order.price if new_order.price and user_data.direction == DirectionEnum.BUY else \
-                            OrderModel.price >= new_order.price if new_order.price else True
-
-            matching_orders = await session.scalars(
-                select(OrderModel)
+            price_condition = True  # Для рыночных ордеров нет ограничения по цене
+            available_qty = await session.scalar(
+                select(func.sum(OrderModel.qty - OrderModel.filled))
                 .where(OrderModel.ticker == user_data.ticker)
                 .where(OrderModel.direction == opposite_direction)
                 .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
                 .where(price_condition)
-                .order_by(*sorting_by)
-                .with_for_update()
             )
-            matching_orders = list(matching_orders)
-            logger.info(f'[POST /api/v1/order] Найдено подходящих ордеров: {len(matching_orders)}')
-            for order in matching_orders:
-                logger.info(f'[POST /api/v1/order] Подходящий ордер: id={order.id}, direction={order.direction}, qty={order.qty}, filled={order.filled}, price={order.price}')
-
-            if price is None:
-                available_qty = sum(order.qty - order.filled for order in matching_orders)
-                logger.info(f'[POST /api/v1/order] Доступная ликвидность для рыночного ордера: {available_qty}')
-                if available_qty < new_order.qty:
-                    logger.warning(f'[POST /api/v1/order] Недостаточная ликвидность: доступно={available_qty}, требуется={new_order.qty}')
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail='Insufficient liquidity for market order'
-                    )
-
-            participant_ids = {current_user.id} | {order.user_id for order in matching_orders}
-            participant_balances = await session.scalars(
-                select(BalanceModel)
-                .where(BalanceModel.user_id.in_(participant_ids))
-                .where(BalanceModel.ticker.in_(['RUB', new_order.ticker]))
-                .order_by(BalanceModel.user_id, BalanceModel.ticker)
-                .with_for_update()
-            )
-            participant_balances = list(participant_balances)
-            logger.info(f'[POST /api/v1/order] Балансы участников до сделки: {[(b.user_id, b.ticker, b.amount, b.available) for b in participant_balances]}')
-
-            total_filled = 0
-            for matching_order in matching_orders:
-                if total_filled >= new_order.qty:
-                    break
-
-                remaining_qty = new_order.qty - total_filled
-                match_qty = min(remaining_qty, matching_order.qty - matching_order.filled)
-                if match_qty <= 0:
-                    continue
-
-                transaction_price = matching_order.price
-                if transaction_price is None:
-                    logger.error(f'[POST /api/v1/order] Совпадающий ордер не имеет цены: id={matching_order.id}')
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail='Matching order has no price'
-                    )
-
-                buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
-                seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
-                logger.info(f'[POST /api/v1/order] Исполнение сделки: buyer={buyer}, seller={seller}, qty={match_qty}, price={transaction_price}')
-
-                for user_id, ticker in [(buyer, 'RUB'), (buyer, new_order.ticker), 
-                                      (seller, 'RUB'), (seller, new_order.ticker)]:
-                    balance = next((b for b in participant_balances 
-                                  if b.user_id == user_id and b.ticker == ticker), None)
-                    if not balance:
-                        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)
-                        session.add(balance)
-                        participant_balances.append(balance)
-                        logger.info(f'[POST /api/v1/order] Создан новый баланс: user_id={user_id}, ticker={ticker}')
-
-                    if ticker == 'RUB':
-                        if user_id == buyer:
-                            balance.amount -= match_qty * transaction_price
-                            logger.info(f'[POST /api/v1/order] Обновление баланса RUB покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
-                        else:
-                            balance.amount += match_qty * transaction_price
-                            balance.available += match_qty * transaction_price
-                            logger.info(f'[POST /api/v1/order] Обновление баланса RUB продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
-                    else:
-                        if user_id == buyer:
-                            balance.amount += match_qty
-                            balance.available += match_qty
-                            logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
-                        else:
-                            balance.amount -= match_qty
-                            logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
-
-                transaction = TransactionModel(
-                    ticker=new_order.ticker,
-                    amount=match_qty,
-                    price=transaction_price,
-                    timestamp=datetime.now(timezone.utc),
-                    buyer_id=buyer,
-                    seller_id=seller
+            available_qty = available_qty or 0
+            logger.info(f'[POST /api/v1/order] Доступная ликвидность для рыночного ордера: {available_qty}')
+            if available_qty < user_data.qty:
+                logger.warning(f'[POST /api/v1/order] Недостаточная ликвидность: доступно={available_qty}, требуется={user_data.qty}')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Insufficient liquidity for market order'
                 )
-                session.add(transaction)
-                logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
 
-                matching_order.filled += match_qty
-                if matching_order.filled == matching_order.qty:
-                    matching_order.status = StatusEnum.EXECUTED
-                    logger.info(f'[POST /api/v1/order] Ордер полностью исполнен: id={matching_order.id}')
+        # Основной блок с блокировками
+        new_order = OrderModel(
+            user_id=current_user.id,
+            ticker=user_data.ticker,
+            direction=user_data.direction,
+            qty=user_data.qty,
+            price=price
+        )
+        session.add(new_order)
+        await session.flush()
+        logger.info(f'[POST /api/v1/order] Создан новый ордер: id={new_order.id}, direction={new_order.direction}, qty={new_order.qty}, price={new_order.price}')
+
+        # Загружаем все балансы участников сразу
+        opposite_direction = DirectionEnum.SELL if user_data.direction == DirectionEnum.BUY else DirectionEnum.BUY
+        sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc()) if user_data.direction == DirectionEnum.BUY else (OrderModel.price.desc(), OrderModel.timestamp.asc())
+        price_condition = (OrderModel.price <= new_order.price if new_order.price and user_data.direction == DirectionEnum.BUY else
+                          OrderModel.price >= new_order.price if new_order.price else True)
+
+        matching_orders = await session.scalars(
+            select(OrderModel)
+            .where(OrderModel.ticker == user_data.ticker)
+            .where(OrderModel.direction == opposite_direction)
+            .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
+            .where(price_condition)
+            .order_by(OrderModel.user_id, OrderModel.ticker, *sorting_by)  # Явная сортировка
+            .with_for_update()
+        )
+        matching_orders = list(matching_orders)
+        logger.info(f'[POST /api/v1/order] Найдено подходящих ордеров: {len(matching_orders)}')
+        for order in matching_orders:
+            logger.info(f'[POST /api/v1/order] Подходящий ордер: id={order.id}, direction={order.direction}, qty={order.qty}, filled={order.filled}, price={order.price}')
+
+        participant_ids = {current_user.id} | {order.user_id for order in matching_orders}
+        all_balances = await session.scalars(
+            select(BalanceModel)
+            .where(BalanceModel.user_id.in_(participant_ids))
+            .where(BalanceModel.ticker.in_(['RUB', new_order.ticker]))
+            .order_by(BalanceModel.user_id, BalanceModel.ticker)
+            .with_for_update()
+        )
+        all_balances = list(all_balances)
+        logger.info(f'[POST /api/v1/order] Балансы участников: {[(b.user_id, b.ticker, b.amount, b.available) for b in all_balances]}')
+
+        # Проверяем балансы текущего пользователя
+        rub_balance = next((b for b in all_balances if b.user_id == current_user.id and b.ticker == 'RUB'), None)
+        ticker_balance = next((b for b in all_balances if b.user_id == current_user.id and b.ticker == new_order.ticker), None)
+        logger.info(f'[POST /api/v1/order] RUB баланс: amount={rub_balance.amount if rub_balance else 0}, available={rub_balance.available if rub_balance else 0}')
+        logger.info(f'[POST /api/v1/order] {new_order.ticker} баланс: amount={ticker_balance.amount if ticker_balance else 0}, available={ticker_balance.available if ticker_balance else 0}')
+
+        if user_data.direction == DirectionEnum.BUY:
+            if price is not None:
+                required_rub = user_data.qty * price
+                logger.info(f'[POST /api/v1/order] Требуется RUB для покупки: {required_rub}')
+                if not rub_balance or rub_balance.available < required_rub:
+                    logger.warning(f'[POST /api/v1/order] Недостаточно RUB: доступно={rub_balance.available if rub_balance else 0}, требуется={required_rub}')
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f'Insufficient balance for RUB'
+                    )
+                rub_balance.available -= required_rub
+                logger.info(f'[POST /api/v1/order] Зарезервировано RUB: {required_rub}, новый доступный баланс: {rub_balance.available}')
+        else:
+            if not ticker_balance or ticker_balance.available < user_data.qty:
+                logger.warning(f'[POST /api/v1/order] Недостаточно {new_order.ticker}: доступно={ticker_balance.available if ticker_balance else 0}, требуется={user_data.qty}')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f'Insufficient balance for {new_order.ticker}'
+                )
+            ticker_balance.available -= user_data.qty
+            logger.info(f'[POST /api/v1/order] Зарезервировано {new_order.ticker}: {user_data.qty}, новый доступный баланс: {ticker_balance.available}')
+
+        # Исполнение сделок
+        total_filled = 0
+        for matching_order in matching_orders:
+            if total_filled >= new_order.qty:
+                break
+
+            remaining_qty = new_order.qty - total_filled
+            match_qty = min(remaining_qty, matching_order.qty - matching_order.filled)
+            if match_qty <= 0:
+                continue
+
+            transaction_price = matching_order.price
+            if transaction_price is None:
+                logger.error(f'[POST /api/v1/order] Совпадающий ордер не имеет цены: id={matching_order.id}')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Matching order has no price'
+                )
+
+            buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
+            seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
+            logger.info(f'[POST /api/v1/order] Исполнение сделки: buyer={buyer}, seller={seller}, qty={match_qty}, price={transaction_price}')
+
+            for user_id, ticker in [(buyer, 'RUB'), (buyer, new_order.ticker), (seller, 'RUB'), (seller, new_order.ticker)]:
+                balance = next((b for b in all_balances if b.user_id == user_id and b.ticker == ticker), None)
+                if not balance:
+                    balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)
+                    session.add(balance)
+                    all_balances.append(balance)
+                    logger.info(f'[POST /api/v1/order] Создан новый баланс: user_id={user_id}, ticker={ticker}')
+
+                if ticker == 'RUB':
+                    if user_id == buyer:
+                        balance.amount -= match_qty * transaction_price
+                        logger.info(f'[POST /api/v1/order] Обновление баланса RUB покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
+                    else:
+                        balance.amount += match_qty * transaction_price
+                        balance.available += match_qty * transaction_price
+                        logger.info(f'[POST /api/v1/order] Обновление баланса RUB продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
                 else:
-                    matching_order.status = StatusEnum.PARTIALLY_EXECUTED
-                    logger.info(f'[POST /api/v1/order] Ордер частично исполнен: id={matching_order.id}, filled={matching_order.filled}')
+                    if user_id == buyer:
+                        balance.amount += match_qty
+                        balance.available += match_qty
+                        logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
+                    else:
+                        balance.amount -= match_qty
+                        logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
 
-                total_filled += match_qty
-                logger.info(f'[POST /api/v1/order] Текущий прогресс исполнения: total_filled={total_filled}')
+            transaction = TransactionModel(
+                ticker=new_order.ticker,
+                amount=match_qty,
+                price=transaction_price,
+                timestamp=datetime.now(timezone.utc),
+                buyer_id=buyer,
+                seller_id=seller
+            )
+            session.add(transaction)
+            logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
 
-            new_order.filled = total_filled
-            if total_filled == new_order.qty:
-                new_order.status = StatusEnum.EXECUTED
-                logger.info(f'[POST /api/v1/order] Новый ордер полностью исполнен: id={new_order.id}')
-            elif total_filled > 0:
-                new_order.status = StatusEnum.PARTIALLY_EXECUTED
-                logger.info(f'[POST /api/v1/order] Новый ордер частично исполнен: id={new_order.id}, filled={total_filled}')
+            matching_order.filled += match_qty
+            if matching_order.filled == matching_order.qty:
+                matching_order.status = StatusEnum.EXECUTED
+                logger.info(f'[POST /api/v1/order] Ордер полностью исполнен: id={matching_order.id}')
             else:
-                new_order.status = StatusEnum.NEW
-                logger.info(f'[POST /api/v1/order] Новый ордер создан: id={new_order.id}')
+                matching_order.status = StatusEnum.PARTIALLY_EXECUTED
+                logger.info(f'[POST /api/v1/order] Ордер частично исполнен: id={matching_order.id}, filled={matching_order.filled}')
+
+            total_filled += match_qty
+            logger.info(f'[POST /api/v1/order] Текущий прогресс исполнения: total_filled={total_filled}')
+
+        new_order.filled = total_filled
+        if total_filled == new_order.qty:
+            new_order.status = StatusEnum.EXECUTED
+            logger.info(f'[POST /api/v1/order] Новый ордер полностью исполнен: id={new_order.id}')
+        elif total_filled > 0:
+            new_order.status = StatusEnum.PARTIALLY_EXECUTED
+            logger.info(f'[POST /api/v1/order] Новый ордер частично исполнен: id={new_order.id}, filled={total_filled}')
+        else:
+            new_order.status = StatusEnum.NEW
+            logger.info(f'[POST /api/v1/order] Новый ордер создан: id={new_order.id}')
 
         logger.info(f'[POST /api/v1/order] Ордер успешно создан: id={new_order.id}, filled={new_order.filled}, status={new_order.status}')
         return CreateOrderResponseSchema(
@@ -269,6 +273,7 @@ async def cancel_order(
         order = await session.scalar(
             select(OrderModel)
             .where(OrderModel.id == order_id)
+            .order_by(OrderModel.user_id, OrderModel.ticker)
             .with_for_update()
         )
         if not order:
