@@ -319,7 +319,6 @@ async def get_orders_list(
     orders = await session.scalars(
         select(OrderModel)
         .where(OrderModel.user_id == current_user.id)
-        .options(selectinload(OrderModel.user))
     )
     result = []
     for order in orders:
@@ -361,7 +360,6 @@ async def get_order(
     order = await session.scalar(
         select(OrderModel)
         .where(OrderModel.id == order_id)
-        .options(selectinload(OrderModel.user))
     )
     if not order:
         logger.warning(f'[GET /api/v1/order/{order_id}] Ордер не найден: order_id={order_id}')
