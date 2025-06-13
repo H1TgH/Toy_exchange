@@ -1,10 +1,10 @@
 from enum import Enum as PyEnum
 from datetime import datetime
-from uuid import uuid4
+from uuid import uuid4, UUID
 
 from sqlalchemy import String, Enum,  func
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from src.database import Base
 
@@ -16,10 +16,10 @@ class RoleEnum(PyEnum):
 class UserModel(Base):
     __tablename__ = 'users'
     
-    id: Mapped[str] = mapped_column(
-        UUID,
+    id: Mapped[UUID] = mapped_column(
+        PGUUID,
         primary_key=True,
-        default=lambda: str(uuid4()),
+        default=uuid4,
         unique= True,
         nullable=False,
         index=True

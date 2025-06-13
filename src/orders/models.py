@@ -1,10 +1,10 @@
 from enum import Enum as PyEnum
-from uuid import uuid4
+from uuid import uuid4, UUID
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import Enum, String, Integer, ForeignKey, DateTime, func, Index
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
 
 from src.database import Base
 
@@ -22,15 +22,15 @@ class StatusEnum(PyEnum):
 class OrderModel(Base):
     __tablename__ = 'orders'
 
-    id: Mapped[str] = mapped_column(
-        UUID,
+    id: Mapped[UUID] = mapped_column(
+        PGUUID,
         primary_key=True,
-        default=lambda: str(uuid4()),
+        default=uuid4,
         nullable=False
     )
 
-    user_id: Mapped[str] = mapped_column(
-        UUID,
+    user_id: Mapped[UUID] = mapped_column(
+        PGUUID,
         ForeignKey('users.id', ondelete='CASCADE'),
         index=True,
         nullable=False

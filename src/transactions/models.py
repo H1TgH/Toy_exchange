@@ -1,7 +1,7 @@
 from sqlalchemy import String, Integer, ForeignKey, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.dialects.postgresql import UUID
-from uuid import uuid4
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from uuid import uuid4, UUID
 from datetime import datetime, timezone
 
 from src.database import Base
@@ -10,20 +10,20 @@ from src.database import Base
 class TransactionModel(Base):
     __tablename__ = 'transactions'
 
-    id: Mapped[str] = mapped_column(
-        UUID,
-        default=lambda: str(uuid4()),
+    id: Mapped[UUID] = mapped_column(
+        PGUUID,
+        default=uuid4,
         primary_key=True
     )
 
-    buyer_id: Mapped[str] = mapped_column(
-        UUID,
+    buyer_id: Mapped[UUID] = mapped_column(
+        PGUUID,
         ForeignKey('users.id', ondelete='CASCADE'),
         nullable=True
     )
 
-    seller_id: Mapped[str] = mapped_column(
-        UUID,
+    seller_id: Mapped[UUID] = mapped_column(
+        PGUUID,
         ForeignKey('users.id', ondelete='CASCADE'),
         nullable=True
     )
