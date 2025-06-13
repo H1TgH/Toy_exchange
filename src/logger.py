@@ -27,7 +27,7 @@ def setup_logging():
     log_file = os.path.join(log_dir, 'app.log')
     file_handler = RotatingFileHandler(
         log_file,
-        maxBytes=5_000_000,
+        maxBytes=100_000_000,
         backupCount=5,
         encoding='utf-8'
     )
