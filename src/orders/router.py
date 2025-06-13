@@ -402,7 +402,7 @@ async def get_order_book(
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Запрос стакана: ticker={ticker}')
     bid_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
-        .where(OrderModel.status == StatusEnum.NEW)
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
@@ -412,7 +412,7 @@ async def get_order_book(
 
     ask_orders = await session.execute(
         select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
-        .where(OrderModel.status == StatusEnum.NEW)
+        .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
         .where(OrderModel.price != None)
