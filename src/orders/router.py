@@ -420,8 +420,8 @@ async def get_order_book(
         .order_by(OrderModel.price.asc())
     )
 
-    bid_levels = [{'price': price, 'qty': qty} for price, qty in bid_orders]
-    ask_levels = [{'price': price, 'qty': qty} for price, qty in ask_orders]
+    bid_levels = [{'price': price, 'qty': qty} for price, qty in bid_orders if qty > 0]
+    ask_levels = [{'price': price, 'qty': qty} for price, qty in ask_orders if qty > 0]
 
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Стакан {ticker}:')
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Бид уровни: {bid_levels}')
