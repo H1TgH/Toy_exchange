@@ -142,7 +142,7 @@ async def create_order(
             .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
             .where(price_condition)
             .order_by(*sorting_by)
-            .with_for_update(skip_locked=True)
+            .with_for_update()
         )
         matching_orders = matching_orders.scalars().all()
         logger.info(f'[POST /api/v1/order] Найдено подходящих ордеров: {len(matching_orders)}')

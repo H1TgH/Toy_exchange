@@ -40,5 +40,6 @@ class BalanceModel(Base):
     )
 
     __table_args__ = (
-        Index('index_balance_user_ticker', 'user_id', 'ticker'),
+        Index('idx_balance_user_ticker', 'user_id', 'ticker', unique=True),
+        Index('idx_balance_ticker_amount', 'ticker', 'amount'),
     )

@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Enum
+from sqlalchemy import String, Integer, ForeignKey, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import UUID
 from uuid import uuid4
@@ -48,4 +48,9 @@ class TransactionModel(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False
+    )
+
+    __table_args__ = (
+        Index('idx_transactions_ticker_timestamp', 'ticker', 'timestamp'),
+        Index('idx_transactions_buyer_seller', 'buyer_id', 'seller_id'),
     )

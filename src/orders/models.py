@@ -3,7 +3,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Enum, String, Integer, ForeignKey, DateTime, func
+from sqlalchemy import Enum, String, Integer, ForeignKey, DateTime, func, Index
 from sqlalchemy.dialects.postgresql import UUID
 
 from src.database import Base
@@ -74,4 +74,9 @@ class OrderModel(Base):
         default=lambda: datetime.now(timezone.utc),
         index=True,
         nullable=False
+    )
+
+    __table_args__ = (
+        Index('index_orders_ticker_direction_status', 'ticker', 'direction', 'status'),
+        Index('index_orders_price_timestamp', 'price', 'timestamp'),
     )

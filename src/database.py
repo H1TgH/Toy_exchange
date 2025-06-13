@@ -22,9 +22,9 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=True,
     poolclass=AsyncAdaptedQueuePool,
-    pool_size=20,  # Максимальное количество соединений в пуле
-    max_overflow=10,  # Максимальное количество дополнительных соединений
-    pool_timeout=30,  # Таймаут ожидания соединения из пула
+    pool_size=40,  # Увеличено с 20 до 40
+    max_overflow=20,  # Увеличено с 10 до 20
+    pool_timeout=15,  # Уменьшено с 30 до 15
     pool_recycle=1800,  # Пересоздание соединений каждые 30 минут
     pool_pre_ping=True,  # Проверка соединений перед использованием
     isolation_level='READ COMMITTED'  # Изменяем уровень изоляции
