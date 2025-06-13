@@ -190,9 +190,9 @@ async def create_order(
             logger.info(f'[POST /api/v1/order] Исполнение сделки: buyer={buyer}, seller={seller}, qty={match_qty}, price={transaction_price}')
 
             for user_id, ticker in [(buyer, 'RUB'), (buyer, new_order.ticker), (seller, 'RUB'), (seller, new_order.ticker)]:
-                balance = next((b for b in all_balances if b.user_id == user_id and b.ticker == ticker), None)  # Убрано UUID(user_id)
+                balance = next((b for b in all_balances if b.user_id == user_id and b.ticker == ticker), None)
                 if not balance:
-                    balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)  # Используем user_id напрямую
+                    balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)
                     session.add(balance)
                     await session.flush()
                     all_balances.append(balance)
@@ -201,6 +201,7 @@ async def create_order(
                 if ticker == 'RUB':
                     if user_id == buyer:
                         balance.amount -= match_qty * transaction_price
+                        balance.available -= match_qty * transaction_price
                         logger.info(f'[POST /api/v1/order] Обновление баланса RUB покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
                     else:
                         balance.amount += match_qty * transaction_price
@@ -213,6 +214,7 @@ async def create_order(
                         logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} покупателя: user_id={user_id}, amount={balance.amount}, available={balance.available}')
                     else:
                         balance.amount -= match_qty
+                        balance.available -= match_qty
                         logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
 
             transaction = TransactionModel(
