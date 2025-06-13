@@ -36,7 +36,7 @@ async def update_balance(
 
     if not balance:
         logger.info(f'Баланс для {ticker} у пользователя {user_id} не найден, создаем новый')
-        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)  # Используем user_id напрямую
+        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0) 
         session.add(balance)
         await session.flush()
     new_amount = balance.amount + delta_amount
@@ -62,7 +62,6 @@ async def create_order(
     try:
         logger.info(f'[POST /api/v1/order] Начало создания ордера: user_id={current_user.id}, ticker={user_data.ticker}, direction={user_data.direction}, qty={user_data.qty}, price={getattr(user_data, "price", None)}')
 
-        # Проверяем инструмент
         instrument = await session.scalar(
             select(InstrumentModel)
             .where(InstrumentModel.ticker == user_data.ticker)
@@ -78,10 +77,9 @@ async def create_order(
         price = user_data.price if isinstance(user_data, LimitOrderBodySchema) else None
         logger.info(f'[POST /api/v1/order] Тип ордера: {"LIMIT" if price else "MARKET"}, price={price}')
 
-        # Проверяем ликвидность для рыночного ордера без блокировки
         if price is None:
             opposite_direction = DirectionEnum.SELL if user_data.direction == DirectionEnum.BUY else DirectionEnum.BUY
-            price_condition = True  # Для рыночных ордеров нет ограничения по цене
+            price_condition = True
             available_qty = await session.scalar(
                 select(func.sum(OrderModel.qty - OrderModel.filled))
                 .where(OrderModel.ticker == user_data.ticker)
@@ -109,7 +107,6 @@ async def create_order(
         await session.flush()
         logger.info(f'[POST /api/v1/order] Создан новый ордер: id={new_order.id}, direction={new_order.direction}, qty={new_order.qty}, price={new_order.price}')
 
-        # Загружаем все балансы участников сразу
         opposite_direction = DirectionEnum.SELL if user_data.direction == DirectionEnum.BUY else DirectionEnum.BUY
         sorting_by = (OrderModel.price.asc(), OrderModel.timestamp.asc()) if user_data.direction == DirectionEnum.BUY else (OrderModel.price.desc(), OrderModel.timestamp.asc())
         price_condition = (OrderModel.price <= new_order.price if new_order.price and user_data.direction == DirectionEnum.BUY else
@@ -121,7 +118,7 @@ async def create_order(
             .where(OrderModel.direction == opposite_direction)
             .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
             .where(price_condition)
-            .order_by(OrderModel.user_id, OrderModel.ticker, *sorting_by)  # Явная сортировка
+            .order_by(OrderModel.user_id, OrderModel.ticker, *sorting_by)
             .with_for_update()
         )
         matching_orders = list(matching_orders)
@@ -220,39 +217,54 @@ async def create_order(
                             balance.available -= match_qty
                             logger.info(f'[POST /api/v1/order] Обновление баланса {ticker} продавца: user_id={user_id}, amount={balance.amount}, available={balance.available}')
 
-            transaction = TransactionModel(
-                ticker=new_order.ticker,
-                amount=match_qty,
-                price=transaction_price,
-                timestamp=datetime.now(timezone.utc),
-                buyer_id=buyer,
-                seller_id=seller
-            )
-            session.add(transaction)
-            await session.flush()
-            logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
+                matching_order.filled += match_qty
+                if matching_order.filled == matching_order.qty:
+                    matching_order.status = StatusEnum.EXECUTED
+                    logger.info(f'[POST /api/v1/order] Ордер полностью исполнен: id={matching_order.id}')
+                else:
+                    matching_order.status = StatusEnum.PARTIALLY_EXECUTED
+                    logger.info(f'[POST /api/v1/order] Ордер частично исполнен: id={matching_order.id}, filled={matching_order.filled}')
 
-            matching_order.filled += match_qty
-            if matching_order.filled == matching_order.qty:
-                matching_order.status = StatusEnum.EXECUTED
-                logger.info(f'[POST /api/v1/order] Ордер полностью исполнен: id={matching_order.id}')
-            else:
-                matching_order.status = StatusEnum.PARTIALLY_EXECUTED
-                logger.info(f'[POST /api/v1/order] Ордер частично исполнен: id={matching_order.id}, filled={matching_order.filled}')
+                total_filled += match_qty
+                logger.info(f'[POST /api/v1/order] Текущий прогресс исполнения: total_filled={total_filled}')
 
-            total_filled += match_qty
-            logger.info(f'[POST /api/v1/order] Текущий прогресс исполнения: total_filled={total_filled}')
+                transaction = TransactionModel(
+                    ticker=new_order.ticker,
+                    amount=match_qty,
+                    price=transaction_price,
+                    timestamp=datetime.now(timezone.utc),
+                    buyer_id=buyer,
+                    seller_id=seller
+                )
+                session.add(transaction)
+                await session.flush()
+                logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
 
-        new_order.filled = total_filled
-        if total_filled == new_order.qty:
-            new_order.status = StatusEnum.EXECUTED
-            logger.info(f'[POST /api/v1/order] Новый ордер полностью исполнен: id={new_order.id}')
-        elif total_filled > 0:
-            new_order.status = StatusEnum.PARTIALLY_EXECUTED
-            logger.info(f'[POST /api/v1/order] Новый ордер частично исполнен: id={new_order.id}, filled={total_filled}')
-        else:
-            new_order.status = StatusEnum.NEW
-            logger.info(f'[POST /api/v1/order] Новый ордер создан: id={new_order.id}')
+                new_order.filled = total_filled
+                if total_filled == new_order.qty:
+                    new_order.status = StatusEnum.EXECUTED
+                    logger.info(f'[POST /api/v1/order] Новый ордер полностью исполнен: id={new_order.id}')
+                elif total_filled > 0:
+                    new_order.status = StatusEnum.PARTIALLY_EXECUTED
+                    logger.info(f'[POST /api/v1/order] Новый ордер частично исполнен: id={new_order.id}, filled={total_filled}')
+                else:
+                    new_order.status = StatusEnum.NEW
+                    logger.info(f'[POST /api/v1/order] Новый ордер создан: id={new_order.id}')
+
+                for user_id, ticker in [(buyer, 'RUB'), (buyer, new_order.ticker), (seller, 'RUB'), (seller, new_order.ticker)]:
+                    balance = next((b for b in all_balances if b.user_id == user_id and b.ticker == ticker), None)
+                    if balance:
+                        if ticker == 'RUB':
+                            if user_id == buyer:
+                                balance.available = balance.amount
+                            else:
+                                balance.available = balance.amount
+                        else:
+                            if user_id == buyer:
+                                balance.available = balance.amount
+                            else:
+                                balance.available = balance.amount
+                        logger.info(f'[POST /api/v1/order] Обновление доступного баланса: user_id={user_id}, ticker={ticker}, amount={balance.amount}, available={balance.available}')
 
         logger.info(f'[POST /api/v1/order] Ордер успешно создан: id={new_order.id}, filled={new_order.filled}, status={new_order.status}')
         return CreateOrderResponseSchema(
