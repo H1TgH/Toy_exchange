@@ -28,7 +28,7 @@ async def update_balance(
     logger.debug(f'[UPDATE_BALANCE] Обновление баланса: user_id={user_id}, ticker={ticker}, delta_amount={delta_amount}, delta_available={delta_available}')
     balance = await session.scalar(
         select(BalanceModel)
-        .where(BalanceModel.user_id == UUID(user_id))
+        .where(BalanceModel.user_id == user_id)
         .where(BalanceModel.ticker == ticker)
         .order_by(BalanceModel.user_id, BalanceModel.ticker)
         .with_for_update()
@@ -36,10 +36,9 @@ async def update_balance(
 
     if not balance:
         logger.info(f'Баланс для {ticker} у пользователя {user_id} не найден, создаем новый')
-        balance = BalanceModel(user_id=UUID(user_id), ticker=ticker, amount=0, available=0)
+        balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)  # Используем user_id напрямую
         session.add(balance)
-        await session.flush()  # Сохраняем новый баланс сразу
-
+        await session.flush()
     new_amount = balance.amount + delta_amount
     new_available = balance.available + (delta_available if delta_available is not None else delta_amount)
     
@@ -186,14 +185,14 @@ async def create_order(
                     detail='Matching order has no price'
                 )
 
-            buyer = UUID(current_user.id) if new_order.direction == DirectionEnum.BUY else UUID(matching_order.user_id)
-            seller = UUID(matching_order.user_id) if new_order.direction == DirectionEnum.BUY else UUID(current_user.id)
+            buyer = current_user.id if new_order.direction == DirectionEnum.BUY else matching_order.user_id
+            seller = matching_order.user_id if new_order.direction == DirectionEnum.BUY else current_user.id
             logger.info(f'[POST /api/v1/order] Исполнение сделки: buyer={buyer}, seller={seller}, qty={match_qty}, price={transaction_price}')
 
             for user_id, ticker in [(buyer, 'RUB'), (buyer, new_order.ticker), (seller, 'RUB'), (seller, new_order.ticker)]:
-                balance = next((b for b in all_balances if b.user_id == UUID(user_id) and b.ticker == ticker), None)
+                balance = next((b for b in all_balances if b.user_id == user_id and b.ticker == ticker), None)  # Убрано UUID(user_id)
                 if not balance:
-                    balance = BalanceModel(user_id=UUID(user_id), ticker=ticker, amount=0, available=0)
+                    balance = BalanceModel(user_id=user_id, ticker=ticker, amount=0, available=0)  # Используем user_id напрямую
                     session.add(balance)
                     await session.flush()
                     all_balances.append(balance)
@@ -227,17 +226,6 @@ async def create_order(
             session.add(transaction)
             await session.flush()
             logger.info(f'[POST /api/v1/order] Создана транзакция: id={transaction.id}, ticker={transaction.ticker}, amount={transaction.amount}, price={transaction.price}')
-
-            matching_order.filled += match_qty
-            if matching_order.filled == matching_order.qty:
-                matching_order.status = StatusEnum.EXECUTED
-                logger.info(f'[POST /api/v1/order] Ордер полностью исполнен: id={matching_order.id}')
-            else:
-                matching_order.status = StatusEnum.PARTIALLY_EXECUTED
-                logger.info(f'[POST /api/v1/order] Ордер частично исполнен: id={matching_order.id}, filled={matching_order.filled}')
-
-            total_filled += match_qty
-            logger.info(f'[POST /api/v1/order] Текущий прогресс исполнения: total_filled={total_filled}')
 
         new_order.filled = total_filled
         if total_filled == new_order.qty:
