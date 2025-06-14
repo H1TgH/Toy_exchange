@@ -22,9 +22,9 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=True,
     poolclass=AsyncAdaptedQueuePool,
-    pool_size=20,
-    max_overflow=20,
-    pool_timeout=60,
+    pool_size=15,
+    max_overflow=15,
+    pool_timeout=30,
     pool_recycle=1800,
     pool_pre_ping=True,
     isolation_level='READ COMMITTED'
