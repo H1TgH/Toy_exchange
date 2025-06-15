@@ -77,6 +77,37 @@ async def create_order(
         price = user_data.price if isinstance(user_data, LimitOrderBodySchema) else None
         logger.info(f'[POST /api/v1/order] Тип ордера: {"LIMIT" if price else "MARKET"}, price={price}')
 
+        if user_data.direction == DirectionEnum.BUY:
+            balance = await session.scalar(
+                select(BalanceModel)
+                .where(BalanceModel.user_id == current_user.id)
+                .where(BalanceModel.ticker == 'RUB')
+                .with_for_update()
+            )
+            if not balance or balance.available < user_data.qty * price:
+                logger.warning(f'[POST /api/v1/order] Недостаточно RUB: доступно={balance.available if balance else 0}, требуется={user_data.qty * price}')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail='Insufficient RUB balance'
+                )
+            balance.available -= user_data.qty * price
+            logger.info(f'[POST /api/v1/order] Зарезервировано RUB: {user_data.qty * price}, новый доступный баланс: {balance.available}')
+        else:
+            balance = await session.scalar(
+                select(BalanceModel)
+                .where(BalanceModel.user_id == current_user.id)
+                .where(BalanceModel.ticker == user_data.ticker)
+                .with_for_update()
+            )
+            if not balance or balance.available < user_data.qty:
+                logger.warning(f'[POST /api/v1/order] Недостаточно {user_data.ticker}: доступно={balance.available if balance else 0}, требуется={user_data.qty}')
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f'Insufficient {user_data.ticker} balance'
+                )
+            balance.available -= user_data.qty
+            logger.info(f'[POST /api/v1/order] Зарезервировано {user_data.ticker}: {user_data.qty}, новый доступный баланс: {balance.available}')
+
         if price is None:
             opposite_direction = DirectionEnum.SELL if user_data.direction == DirectionEnum.BUY else DirectionEnum.BUY
             price_condition = True
@@ -261,7 +292,10 @@ async def get_order_book(
 ):
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Запрос стакана: ticker={ticker}')
     bid_orders = await session.execute(
-        select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
+        select(
+            OrderModel.price,
+            func.sum(OrderModel.qty - OrderModel.filled)
+        )
         .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.BUY)
         .where(OrderModel.ticker == ticker)
@@ -271,7 +305,10 @@ async def get_order_book(
     )
 
     ask_orders = await session.execute(
-        select(OrderModel.price, func.sum(OrderModel.qty - OrderModel.filled))
+        select(
+            OrderModel.price,
+            func.sum(OrderModel.qty - OrderModel.filled)
+        )
         .where(OrderModel.status.in_([StatusEnum.NEW, StatusEnum.PARTIALLY_EXECUTED]))
         .where(OrderModel.direction == DirectionEnum.SELL)
         .where(OrderModel.ticker == ticker)
@@ -337,7 +374,6 @@ async def match_orders(session: SessionDep, new_order: OrderModel):
         if buyer == seller:
             logger.info(f'[match_orders] Самоторговля: buyer={buyer}, seller={seller}, qty={match_qty}, price={transaction_price}. Пропускаем обновление балансов.')
         else:
-            # Обновляем балансы покупателя
             buyer_rub_balance = await session.scalar(
                 select(BalanceModel)
                 .where(BalanceModel.user_id == buyer)
@@ -358,7 +394,6 @@ async def match_orders(session: SessionDep, new_order: OrderModel):
                 buyer_ticker_balance = BalanceModel(user_id=buyer, ticker=new_order.ticker, amount=0, available=0)
                 session.add(buyer_ticker_balance)
 
-            # Обновляем балансы продавца
             seller_rub_balance = await session.scalar(
                 select(BalanceModel)
                 .where(BalanceModel.user_id == seller)
@@ -379,23 +414,17 @@ async def match_orders(session: SessionDep, new_order: OrderModel):
                 seller_ticker_balance = BalanceModel(user_id=seller, ticker=new_order.ticker, amount=0, available=0)
                 session.add(seller_ticker_balance)
 
-            # Обновляем балансы
             buyer_rub_balance.amount -= match_qty * transaction_price
             buyer_ticker_balance.amount += match_qty
             seller_rub_balance.amount += match_qty * transaction_price
             seller_ticker_balance.amount -= match_qty
 
-            # Обновляем доступные балансы с учетом резервов
             if new_order.direction == DirectionEnum.BUY:
-                # Для покупателя освобождаем резерв RUB
-                buyer_rub_balance.available = buyer_rub_balance.amount
-                # Для продавца освобождаем резерв тикера
-                seller_ticker_balance.available = seller_ticker_balance.amount
+                buyer_rub_balance.available = buyer_rub_balance.amount + (new_order.qty - total_filled - match_qty) * new_order.price
+                seller_ticker_balance.available = seller_ticker_balance.amount + (matching_order.qty - matching_order.filled - match_qty)
             else:
-                # Для продавца освобождаем резерв RUB
-                seller_rub_balance.available = seller_rub_balance.amount
-                # Для покупателя освобождаем резерв тикера
-                buyer_ticker_balance.available = buyer_ticker_balance.amount
+                seller_rub_balance.available = seller_rub_balance.amount + (new_order.qty - total_filled - match_qty) * new_order.price
+                buyer_ticker_balance.available = buyer_ticker_balance.amount + (matching_order.qty - matching_order.filled - match_qty)
 
             logger.info(f'[match_orders] Обновлены балансы:')
             logger.info(f'[match_orders] Покупатель RUB: amount={buyer_rub_balance.amount}, available={buyer_rub_balance.available}')
@@ -414,7 +443,7 @@ async def match_orders(session: SessionDep, new_order: OrderModel):
         total_filled += match_qty
         logger.info(f'[match_orders] Текущий прогресс исполнения: total_filled={total_filled}')
 
-        if buyer != seller:  # Создаем транзакцию только если это не самоторговля
+        if buyer != seller:
             transaction = TransactionModel(
                 ticker=new_order.ticker,
                 amount=match_qty,
