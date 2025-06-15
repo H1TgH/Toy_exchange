@@ -138,7 +138,19 @@ async def create_order(
         await session.flush()
         logger.info(f'[POST /api/v1/order] Создан новый ордер: id={new_order.id}, direction={new_order.direction}, qty={new_order.qty}, price={new_order.price}')
 
-        await match_orders(session, new_order)
+        try:
+            await match_orders(session, new_order)
+        except Exception as e:
+            logger.error(f'[POST /api/v1/order] Ошибка при исполнении ордера: {str(e)}', exc_info=True)
+            if user_data.direction == DirectionEnum.BUY:
+                balance.available += user_data.qty * price
+            else:
+                balance.available += user_data.qty
+            await session.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail='Error executing order'
+            )
 
         logger.info(f'[POST /api/v1/order] Ордер успешно создан: id={new_order.id}, filled={new_order.filled}, status={new_order.status}')
         return CreateOrderResponseSchema(
@@ -148,9 +160,14 @@ async def create_order(
             status=new_order.status
         )
 
-    except Exception as e:
-        logger.error(f'[POST /api/v1/order] Ошибка при создании ордера: {str(e)}', exc_info=True)
+    except HTTPException:
         raise
+    except Exception as e:
+        logger.error(f'[POST /api/v1/order] Неожиданная ошибка: {str(e)}', exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail='Internal server error'
+        )
 
 @order_router.delete('/api/v1/order/{order_id}', response_model=OkResponseSchema, tags=['order'])
 async def cancel_order(
@@ -319,7 +336,7 @@ async def get_order_book(
 
     bid_levels = [OrderLevel(price=price, qty=qty) for price, qty in bid_orders if qty > 0]
     ask_levels = [OrderLevel(price=price, qty=qty) for price, qty in ask_orders if qty > 0]
-
+    
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Стакан {ticker}:')
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Бид уровни: {bid_levels}')
     logger.info(f'[GET /api/v1/public/orderbook/{ticker}] Аск уровни: {ask_levels}')
